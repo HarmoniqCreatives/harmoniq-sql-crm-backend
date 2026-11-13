@@ -1,0 +1,42 @@
+{
+  "name": "harmoniq-creative-crm-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Harmoniq Creative CRM API (Express + Sequelize + MySQL)",
+  "main": "src/server.js",
+  "scripts": {
+    "dev": "nodemon src/server.js",
+    "start": "node src/server.js",
+    "db:migrate": "sequelize-cli db:migrate",
+    "db:migrate:undo": "sequelize-cli db:migrate:undo",
+    "db:migrate:status": "sequelize-cli db:migrate:status",
+    "db:seed:roles": "node src/scripts/seedRolesPermissions.js",
+    "db:seed:catalog": "node src/scripts/seedCatalogDefaults.js",
+    "db:setup": "npm run db:migrate && npm run db:seed:roles && npm run db:seed:catalog",
+    "test": "node --test --test-concurrency=1 test/*.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.9",
+    "express": "^5.3.0",
+    "express-rate-limit": "^8.7.3",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.3",
+    "morgan": "^1.12.1",
+    "mysql2": "^3.24.6",
+    "nodemailer": "^10.3.1",
+    "sequelize": "^6.37.8",
+    "uuid": "^14.0.3",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14",
+    "sequelize-cli": "^6.6.5",
+    "supertest": "^7.3.1"
+  }
+}

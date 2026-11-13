@@ -1,0 +1,27 @@
+const security = {
+  nameMaxLength: 120,
+  companyNameMaxLength: 160,
+  passwordMinLength: 8,
+  bcryptRounds: 12,
+  accessTokenTtl: process.env.JWT_ACCESS_TTL || '15m',
+  refreshTokenDays: 7,
+  verifyHours: 24,
+  resetHours: 1,
+  resendVerifyMinutes: 1,
+  invitationHours: 24,
+  passwordResetHours: Number(process.env.PASSWORD_RESET_HOURS || 1),
+  oauthStateMinutes: 10,
+  metaSecretMaxLength: 255,
+  metaLabelMaxLength: 120,
+  metaPageListLimit: 20,
+  metaPageDefaultLimit: 20,
+  metaPageMaxLimit: 100,
+  metaLeadRetryLimit: 5,
+  metaLeadPollMs: 5000,
+  metaSyncPollMs: 2000,
+  metaSyncPageLimit: 50,
+  metaLeadPageLimit: 50,
+  metaSyncStaleMinutes: 30,
+}
+
+module.exports = { security }

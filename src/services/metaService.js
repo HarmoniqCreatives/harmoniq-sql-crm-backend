@@ -111,7 +111,7 @@ function readFrontendBaseUrl() {
 }
 
 function buildOAuthRedirect(result) {
-  const url = new URL(`${readFrontendBaseUrl()}/meta`)
+  const url = new URL(`${readFrontendBaseUrl()}/integrations/facebook`)
   url.searchParams.set(messages.metaResultParam, result)
   return url.toString()
 }

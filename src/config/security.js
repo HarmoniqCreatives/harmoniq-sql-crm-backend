@@ -22,6 +22,18 @@ const security = {
   metaSyncPageLimit: 50,
   metaLeadPageLimit: 50,
   metaSyncStaleMinutes: 30,
+  emailReportsPollMs: 60_000,
+  emailReportsLeaseMs: 10 * 60 * 1000,
+  emailReportsMaxRecipients: 20,
+  emailReportsDefaultTimezone: 'Asia/Kolkata',
+  whatsappOutboxPollMs: Number(process.env.WHATSAPP_OUTBOX_POLL_MS || 3000),
+  whatsappOutboxLeaseMs: Number(process.env.WHATSAPP_OUTBOX_LEASE_MS || 60_000),
+  whatsappOutboxBatchSize: Number(process.env.WHATSAPP_OUTBOX_BATCH_SIZE || 10),
+  whatsappOutboxMaxAttempts: Number(process.env.WHATSAPP_OUTBOX_MAX_ATTEMPTS || 5),
+  whatsappGraphTimeoutMs: Number(process.env.WHATSAPP_GRAPH_TIMEOUT_MS || 20_000),
+  whatsappRegistrationLeaseMs: 2 * 60 * 1000,
+  whatsappTemplatePageLimit: Number(process.env.WHATSAPP_TEMPLATE_PAGE_LIMIT || 50),
+  whatsappTemplateMaxBodyVariables: 20,
 }
 
 module.exports = { security }

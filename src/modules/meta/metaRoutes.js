@@ -7,11 +7,13 @@ const {
   deleteProfile,
   getAvailablePages,
   getConnections,
+  getDefaultAssignee,
   getLeadCounts,
   getOAuthCallback,
   getPages,
   getProfiles,
   getSyncJob,
+  patchDefaultAssignee,
   patchProfile,
   postConnectionPages,
   postDisconnectConnection,
@@ -42,6 +44,17 @@ metaRouter.get('/profiles', requirePermission(permissionKeys.metaView), asyncHan
 metaRouter.post('/profiles', requirePermission(permissionKeys.metaManage), asyncHandler(postProfile))
 metaRouter.patch('/profiles/:id', requirePermission(permissionKeys.metaManage), asyncHandler(patchProfile))
 metaRouter.delete('/profiles/:id', requirePermission(permissionKeys.metaManage), asyncHandler(deleteProfile))
+
+metaRouter.get(
+  '/default-assignee',
+  requirePermission(permissionKeys.metaView),
+  asyncHandler(getDefaultAssignee),
+)
+metaRouter.patch(
+  '/default-assignee',
+  requirePermission(permissionKeys.metaManage),
+  asyncHandler(patchDefaultAssignee),
+)
 
 metaRouter.get(
   '/connections',

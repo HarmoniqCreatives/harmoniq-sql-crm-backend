@@ -48,6 +48,8 @@ function presentLead(lead, itemMap, userMap, timeZone) {
     secondaryAgent: secondary ? { id: secondary.id, name: secondary.name } : null,
     originalPrimaryAgent: originalPrimary ? { id: originalPrimary.id, name: originalPrimary.name } : null,
     campaignName: lead.campaignName || '',
+    facebookPageId: lead.facebookPageId || '',
+    facebookPageName: lead.facebookPageName || '',
     branchId: lead.branchId || null,
     teamId: lead.teamId || null,
     propertyType: lead.propertyType,

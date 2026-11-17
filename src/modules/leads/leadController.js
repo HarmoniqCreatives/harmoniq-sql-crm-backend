@@ -6,10 +6,28 @@ const {
   listLeads,
   updateLead,
 } = require('../../services/leadService')
+const {
+  exportLeads,
+  listLeadPageTypes,
+} = require('../../services/leadExportService')
 
 /** GET /api/leads */
 async function getLeads(req, res) {
   const result = await listLeads(req.auth, req.query)
+  res.status(200).json({ data: result })
+}
+
+/** GET /api/leads/export — CSV/XLSX of all matching leads (no pagination). */
+async function getLeadsExport(req, res) {
+  const result = await exportLeads(req.auth, req.query)
+  res.setHeader('Content-Type', result.contentType)
+  res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`)
+  res.status(200).send(result.body)
+}
+
+/** GET /api/leads/page-types */
+async function getLeadPageTypes(req, res) {
+  const result = await listLeadPageTypes(req.auth)
   res.status(200).json({ data: result })
 }
 
@@ -45,6 +63,8 @@ async function removeLead(req, res) {
 
 module.exports = {
   getLeads,
+  getLeadsExport,
+  getLeadPageTypes,
   getOneLead,
   postLead,
   patchLead,

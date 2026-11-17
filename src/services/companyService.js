@@ -2,6 +2,7 @@ const { getModels } = require('../models')
 const { timezones } = require('../utils/enums')
 const { AppError, errors } = require('../utils/errors')
 const { readText } = require('../utils/helpers')
+const { presentEmailReports } = require('./emailReportService')
 
 /**
  * Company defaults used by Settings and (later) lead currency / follow-up timezone.
@@ -10,19 +11,25 @@ const { readText } = require('../utils/helpers')
 
 /**
  * @param {object} company
+ * @param {object} [emailReports]
  * @returns {object}
  */
-function presentCompany(company) {
+function presentCompany(company, emailReports) {
   const enabled = Array.isArray(company.enabledCurrencies)
     ? company.enabledCurrencies
     : []
-  return {
+  const payload = {
     id: company.id,
     name: company.name,
     timezone: company.timezone,
     baseCurrency: company.baseCurrency,
     enabledCurrencies: enabled,
+    emailReportsEnabled: Boolean(company.emailReportsEnabled),
   }
+  if (emailReports) {
+    payload.emailReports = emailReports
+  }
+  return payload
 }
 
 /**
@@ -35,7 +42,8 @@ async function getCompany(auth) {
   if (!company) {
     throw new AppError(errors.companyMissing, 500)
   }
-  return presentCompany(company)
+  const emailReports = await presentEmailReports(company)
+  return presentCompany(company, emailReports)
 }
 
 /**
@@ -64,7 +72,8 @@ async function updateCompany(auth, body) {
   company.timezone = timezone
   company.baseCurrency = baseCurrency
   await company.save()
-  return presentCompany(company)
+  const emailReports = await presentEmailReports(company)
+  return presentCompany(company, emailReports)
 }
 
 module.exports = {

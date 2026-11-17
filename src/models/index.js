@@ -22,6 +22,16 @@ const { defineMetaLeadFormSubscription } = require('./MetaLeadFormSubscription')
 const { defineMetaOAuthState } = require('./MetaOAuthState')
 const { defineMetaWebhookIngestion } = require('./MetaWebhookIngestion')
 const { defineMetaSyncJob } = require('./MetaSyncJob')
+const { defineCompanyEmailReport } = require('./CompanyEmailReport')
+const { defineEmailReportDeliveryLog } = require('./EmailReportDeliveryLog')
+const { defineWhatsAppCompanyConfig } = require('./WhatsAppCompanyConfig')
+const { defineWhatsAppEmbeddedSignupSession } = require('./WhatsAppEmbeddedSignupSession')
+const { defineWhatsAppTemplate } = require('./WhatsAppTemplate')
+const { defineWhatsAppWorkflowBinding } = require('./WhatsAppWorkflowBinding')
+const { defineWhatsAppMessageLog } = require('./WhatsAppMessageLog')
+const { defineWhatsAppOutbox } = require('./WhatsAppOutbox')
+const { defineWhatsAppWebhookEvent } = require('./WhatsAppWebhookEvent')
+const { defineWhatsAppAuditLog } = require('./WhatsAppAuditLog')
 
 let models
 
@@ -53,6 +63,16 @@ function getModels() {
   const MetaOAuthState = defineMetaOAuthState(sequelize)
   const MetaWebhookIngestion = defineMetaWebhookIngestion(sequelize)
   const MetaSyncJob = defineMetaSyncJob(sequelize)
+  const CompanyEmailReport = defineCompanyEmailReport(sequelize)
+  const EmailReportDeliveryLog = defineEmailReportDeliveryLog(sequelize)
+  const WhatsAppCompanyConfig = defineWhatsAppCompanyConfig(sequelize)
+  const WhatsAppEmbeddedSignupSession = defineWhatsAppEmbeddedSignupSession(sequelize)
+  const WhatsAppTemplate = defineWhatsAppTemplate(sequelize)
+  const WhatsAppWorkflowBinding = defineWhatsAppWorkflowBinding(sequelize)
+  const WhatsAppMessageLog = defineWhatsAppMessageLog(sequelize)
+  const WhatsAppOutbox = defineWhatsAppOutbox(sequelize)
+  const WhatsAppWebhookEvent = defineWhatsAppWebhookEvent(sequelize)
+  const WhatsAppAuditLog = defineWhatsAppAuditLog(sequelize)
 
   Company.hasMany(Role, { foreignKey: 'companyId' })
   Company.hasMany(User, { foreignKey: 'companyId' })
@@ -70,6 +90,16 @@ function getModels() {
   Company.hasMany(MetaOAuthState, { foreignKey: 'companyId' })
   Company.hasMany(MetaWebhookIngestion, { foreignKey: 'companyId' })
   Company.hasMany(MetaSyncJob, { foreignKey: 'companyId' })
+  Company.hasMany(CompanyEmailReport, { foreignKey: 'companyId' })
+  Company.hasMany(EmailReportDeliveryLog, { foreignKey: 'companyId' })
+  Company.hasOne(WhatsAppCompanyConfig, { foreignKey: 'companyId' })
+  Company.hasMany(WhatsAppEmbeddedSignupSession, { foreignKey: 'companyId' })
+  Company.hasMany(WhatsAppTemplate, { foreignKey: 'companyId' })
+  Company.hasMany(WhatsAppWorkflowBinding, { foreignKey: 'companyId' })
+  Company.hasMany(WhatsAppMessageLog, { foreignKey: 'companyId' })
+  Company.hasMany(WhatsAppOutbox, { foreignKey: 'companyId' })
+  Company.hasMany(WhatsAppWebhookEvent, { foreignKey: 'companyId' })
+  Company.hasMany(WhatsAppAuditLog, { foreignKey: 'companyId' })
 
   Role.belongsTo(Company, { foreignKey: 'companyId' })
   Role.hasMany(User, { foreignKey: 'roleId' })
@@ -157,6 +187,31 @@ function getModels() {
   MetaSyncJob.belongsTo(Company, { foreignKey: 'companyId' })
   MetaSyncJob.belongsTo(MetaPage, { foreignKey: 'metaPageId' })
 
+  CompanyEmailReport.belongsTo(Company, { foreignKey: 'companyId' })
+  EmailReportDeliveryLog.belongsTo(Company, { foreignKey: 'companyId' })
+  EmailReportDeliveryLog.belongsTo(CompanyEmailReport, { foreignKey: 'reportId', as: 'report' })
+
+  WhatsAppCompanyConfig.belongsTo(Company, { foreignKey: 'companyId' })
+  WhatsAppEmbeddedSignupSession.belongsTo(Company, { foreignKey: 'companyId' })
+  WhatsAppEmbeddedSignupSession.belongsTo(User, { foreignKey: 'userId' })
+
+  WhatsAppTemplate.belongsTo(Company, { foreignKey: 'companyId' })
+  WhatsAppTemplate.hasMany(WhatsAppWorkflowBinding, { foreignKey: 'templateId' })
+
+  WhatsAppWorkflowBinding.belongsTo(Company, { foreignKey: 'companyId' })
+  WhatsAppWorkflowBinding.belongsTo(WhatsAppTemplate, { foreignKey: 'templateId', as: 'template' })
+
+  WhatsAppMessageLog.belongsTo(Company, { foreignKey: 'companyId' })
+  WhatsAppMessageLog.belongsTo(WhatsAppTemplate, { foreignKey: 'templateId', as: 'template' })
+  WhatsAppMessageLog.hasOne(WhatsAppOutbox, { foreignKey: 'messageLogId', as: 'outbox' })
+
+  WhatsAppOutbox.belongsTo(Company, { foreignKey: 'companyId' })
+  WhatsAppOutbox.belongsTo(WhatsAppMessageLog, { foreignKey: 'messageLogId', as: 'messageLog' })
+
+  WhatsAppWebhookEvent.belongsTo(Company, { foreignKey: 'companyId' })
+  WhatsAppAuditLog.belongsTo(Company, { foreignKey: 'companyId' })
+  WhatsAppAuditLog.belongsTo(User, { foreignKey: 'actorUserId', as: 'actor' })
+
   models = {
     sequelize,
     Sequelize: require('sequelize').Sequelize,
@@ -183,6 +238,16 @@ function getModels() {
     MetaOAuthState,
     MetaWebhookIngestion,
     MetaSyncJob,
+    CompanyEmailReport,
+    EmailReportDeliveryLog,
+    WhatsAppCompanyConfig,
+    WhatsAppEmbeddedSignupSession,
+    WhatsAppTemplate,
+    WhatsAppWorkflowBinding,
+    WhatsAppMessageLog,
+    WhatsAppOutbox,
+    WhatsAppWebhookEvent,
+    WhatsAppAuditLog,
   }
   return models
 }

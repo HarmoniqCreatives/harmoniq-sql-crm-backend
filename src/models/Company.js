@@ -25,6 +25,18 @@ function defineCompany(sequelize) {
       allowNull: false,
       defaultValue: companyStatuses.pendingVerification,
     },
+    /** Active same-company user assigned as primary on Meta Lead Ads imports. Null = unassigned. */
+    metaDefaultAssigneeUserId: {
+      type: DataTypes.CHAR(36),
+      allowNull: true,
+      defaultValue: null,
+    },
+    /** Master switch for Automatic Email Reports schedules. */
+    emailReportsEnabled: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
   }, {
     tableName: 'companies',
   })

@@ -27,6 +27,8 @@ const permissionRegistry = [
   { key: 'meta.view', module: 'meta', description: 'View Meta connections and Pages' },
   { key: 'meta.manage', module: 'meta', description: 'Manage Meta app profiles and Facebook OAuth' },
   { key: 'meta.pages.manage', module: 'meta', description: 'Connect and disconnect Facebook Pages' },
+  { key: 'whatsapp.manage', module: 'whatsapp', description: 'Manage WhatsApp Cloud API connection and settings' },
+  { key: 'whatsapp.view_logs', module: 'whatsapp', description: 'View WhatsApp delivery and audit logs' },
 ]
 
 /**

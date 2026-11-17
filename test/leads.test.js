@@ -422,8 +422,9 @@ test('scope: company, branch, team, own; secondary agent visibility', async () =
   assert.equal(otherCannotSee.status, 404)
 })
 
-test('assignment requires reason; original assignee preserved across transfers', async () => {
+test('assignment allows optional reason; rejects same agent and cross-company; preserves original assignee', async () => {
   const admin = await registerVerifiedAdmin('LeadAssign')
+  const otherAdmin = await registerVerifiedAdmin('LeadAssignB')
   const statusId = await defaultStatusId(admin.accessToken)
   const first = await createActiveUser({
     companyId: admin.companyId,
@@ -440,6 +441,11 @@ test('assignment requires reason; original assignee preserved across transfers',
     roleKey: roleKeys.agent,
     name: 'Third Agent',
   })
+  const foreignAgent = await createActiveUser({
+    companyId: otherAdmin.companyId,
+    roleKey: roleKeys.agent,
+    name: 'Foreign Agent',
+  })
 
   const created = await authPost(admin.accessToken, '/api/leads', {
     name: 'Assign Lead',
@@ -449,30 +455,113 @@ test('assignment requires reason; original assignee preserved across transfers',
   })
   assert.equal(created.status, 201)
   assert.equal(created.body.data.lead.originalPrimaryAgent.id, first.user.id)
+  assert.equal(created.body.data.lead.primaryAgent.id, first.user.id)
+  assert.equal(created.body.data.lead.primaryAgent.name, 'First Agent')
+
+  const missingTarget = await authPatch(admin.accessToken, `/api/leads/${created.body.data.lead.id}/assignment`, {
+    reason: 'No target',
+  })
+  assert.equal(missingTarget.status, 400)
+
+  const sameAgent = await authPatch(admin.accessToken, `/api/leads/${created.body.data.lead.id}/assignment`, {
+    primaryAgentId: first.user.id,
+    reason: 'Same agent',
+  })
+  assert.equal(sameAgent.status, 400)
+
+  const crossCompany = await authPatch(admin.accessToken, `/api/leads/${created.body.data.lead.id}/assignment`, {
+    primaryAgentId: foreignAgent.user.id,
+    reason: 'Cross company',
+  })
+  assert.equal(crossCompany.status, 404)
 
   const noReason = await authPatch(admin.accessToken, `/api/leads/${created.body.data.lead.id}/assignment`, {
     primaryAgentId: second.user.id,
   })
-  assert.equal(noReason.status, 400)
+  assert.equal(noReason.status, 200)
+  assert.equal(noReason.body.data.lead.primaryAgent.id, second.user.id)
+  assert.equal(noReason.body.data.lead.originalPrimaryAgent.id, first.user.id)
+  assert.equal(noReason.body.data.lead.transfers.length, 1)
+  assert.ok(noReason.body.data.lead.transfers.every((row) => row.reason === ''))
 
-  const transfer1 = await authPatch(admin.accessToken, `/api/leads/${created.body.data.lead.id}/assignment`, {
-    primaryAgentId: second.user.id,
-    reason: 'Coverage',
-  })
-  assert.equal(transfer1.status, 200)
-  assert.equal(transfer1.body.data.lead.primaryAgent.id, second.user.id)
-  assert.equal(transfer1.body.data.lead.originalPrimaryAgent.id, first.user.id)
-  assert.equal(transfer1.body.data.lead.transfers.length, 1)
-
-  const transfer2 = await authPatch(admin.accessToken, `/api/leads/${created.body.data.lead.id}/assignment`, {
+  const emptyReason = await authPatch(admin.accessToken, `/api/leads/${created.body.data.lead.id}/assignment`, {
     primaryAgentId: third.user.id,
-    secondaryAgentId: second.user.id,
+    reason: '',
+  })
+  assert.equal(emptyReason.status, 200)
+  assert.equal(emptyReason.body.data.lead.primaryAgent.id, third.user.id)
+  assert.equal(emptyReason.body.data.lead.transfers.length, 2)
+  assert.ok(emptyReason.body.data.lead.transfers.every((row) => row.reason === ''))
+
+  const nullReason = await authPatch(admin.accessToken, `/api/leads/${created.body.data.lead.id}/assignment`, {
+    primaryAgentId: second.user.id,
+    reason: null,
+  })
+  assert.equal(nullReason.status, 200)
+  assert.equal(nullReason.body.data.lead.primaryAgent.id, second.user.id)
+  assert.equal(nullReason.body.data.lead.transfers.length, 3)
+  assert.ok(nullReason.body.data.lead.transfers.every((row) => row.reason === ''))
+
+  const withReason = await authPatch(admin.accessToken, `/api/leads/${created.body.data.lead.id}/assignment`, {
+    primaryAgentId: third.user.id,
     reason: 'Escalation',
   })
-  assert.equal(transfer2.status, 200)
-  assert.equal(transfer2.body.data.lead.primaryAgent.id, third.user.id)
-  assert.equal(transfer2.body.data.lead.originalPrimaryAgent.id, first.user.id)
-  assert.equal(transfer2.body.data.lead.transfers.length, 2)
+  assert.equal(withReason.status, 200)
+  assert.equal(withReason.body.data.lead.primaryAgent.id, third.user.id)
+  assert.equal(withReason.body.data.lead.originalPrimaryAgent.id, first.user.id)
+  assert.equal(withReason.body.data.lead.transfers.length, 4)
+  const reasoned = withReason.body.data.lead.transfers.filter((row) => row.reason === 'Escalation')
+  assert.equal(reasoned.length, 1)
+  assert.equal(reasoned[0].primaryAgentId, third.user.id)
+})
+
+test('transfer preserves secondary agent and clears it only when new primary equals secondary', async () => {
+  const admin = await registerVerifiedAdmin('LeadSecKeep')
+  const statusId = await defaultStatusId(admin.accessToken)
+  const primary = await createActiveUser({
+    companyId: admin.companyId,
+    roleKey: roleKeys.agent,
+    name: 'Keep Primary',
+  })
+  const secondary = await createActiveUser({
+    companyId: admin.companyId,
+    roleKey: roleKeys.agent,
+    name: 'Keep Secondary',
+  })
+  const other = await createActiveUser({
+    companyId: admin.companyId,
+    roleKey: roleKeys.agent,
+    name: 'Keep Other',
+  })
+
+  const created = await authPost(admin.accessToken, '/api/leads', {
+    name: 'Secondary Preserve Lead',
+    phone: '+971505555088',
+    statusId,
+    primaryAgentId: primary.user.id,
+    secondaryAgentId: secondary.user.id,
+  })
+  assert.equal(created.status, 201)
+  assert.equal(created.body.data.lead.secondaryAgent.id, secondary.user.id)
+
+  const transferred = await authPatch(
+    admin.accessToken,
+    `/api/leads/${created.body.data.lead.id}/assignment`,
+    { primaryAgentId: other.user.id, reason: '' },
+  )
+  assert.equal(transferred.status, 200)
+  assert.equal(transferred.body.data.lead.primaryAgent.id, other.user.id)
+  assert.equal(transferred.body.data.lead.secondaryAgent.id, secondary.user.id)
+
+  // Transferring onto the current secondary clears secondary to avoid agentsMustDiffer.
+  const ontoSecondary = await authPatch(
+    admin.accessToken,
+    `/api/leads/${created.body.data.lead.id}/assignment`,
+    { primaryAgentId: secondary.user.id },
+  )
+  assert.equal(ontoSecondary.status, 200)
+  assert.equal(ontoSecondary.body.data.lead.primaryAgent.id, secondary.user.id)
+  assert.equal(ontoSecondary.body.data.lead.secondaryAgent, null)
 })
 
 test('notes, feedback and activities are append-only with author/timestamps', async () => {

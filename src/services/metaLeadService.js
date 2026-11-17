@@ -25,6 +25,7 @@ const {
 const { decryptSecret } = require('../utils/metaSecrets')
 const graphClient = require('./metaGraph')
 const { createLead } = require('./leadService')
+const { resolveMetaDefaultPrimaryAgentId } = require('./metaAssigneeService')
 
 const INSTANCE_ID = `${os.hostname()}:${process.pid}:${crypto.randomBytes(4).toString('hex')}`
 
@@ -459,9 +460,10 @@ async function processIngestion(ingestion, graph) {
     adName,
     facebookCreatedAt,
   })
+  const primaryAgentId = await resolveMetaDefaultPrimaryAgentId(ingestion.companyId)
 
   try {
-    const result = await createLead(actor, {
+    const createBody = {
       name: mapped.name,
       phone: mapped.phone,
       email: mapped.email,
@@ -470,8 +472,14 @@ async function processIngestion(ingestion, graph) {
       metaLeadId: ingestion.leadgenId,
       campaignId: mapped.campaignId,
       campaignName,
+      facebookPageId: page.pageId || '',
+      facebookPageName: page.name || '',
       feedback: { type: 'general', text: metaNote },
-    })
+    }
+    if (primaryAgentId) {
+      createBody.primaryAgentId = primaryAgentId
+    }
+    const result = await createLead(actor, createBody)
     ingestion.status = metaWebhookIngestionStatuses.imported
     ingestion.leadId = result.lead.id
     ingestion.lastError = ''

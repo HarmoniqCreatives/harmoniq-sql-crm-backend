@@ -39,6 +39,36 @@ function isInternationalPhone(value) {
   return /^\+[1-9]\d{7,14}$/.test(value)
 }
 
+/**
+ * Digits-only WhatsApp Cloud API recipient (optional leading +, strips spaces/hyphens).
+ * Does not invent a country code.
+ *
+ * @param {unknown} value
+ * @returns {string}
+ */
+function normalizeWhatsAppRecipientPhone(value) {
+  let text = String(value === undefined || value === null ? '' : value).trim()
+  text = text.replace(/[\s()-]/g, '')
+  if (text.startsWith('+')) {
+    text = text.slice(1)
+  }
+  if (!/^\d+$/.test(text)) {
+    text = text.replace(/\D/g, '')
+  }
+  return text
+}
+
+/**
+ * Accepts E.164 digits without requiring a leading +.
+ * 11–15 digits so bare 10-digit local numbers fail as missing country code.
+ *
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function isWhatsAppRecipientPhone(value) {
+  return /^[1-9]\d{10,14}$/.test(String(value || ''))
+}
+
 function isWithinLength(value, max) {
   return String(value || '').length <= max
 }
@@ -95,6 +125,8 @@ module.exports = {
   normalizeNameKey,
   normalizePhone,
   isInternationalPhone,
+  normalizeWhatsAppRecipientPhone,
+  isWhatsAppRecipientPhone,
   isWithinLength,
   createSecretToken,
   hashSecret,

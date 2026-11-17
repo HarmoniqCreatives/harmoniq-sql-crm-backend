@@ -29,6 +29,8 @@ const adminUserPermissions = [
   permissionKeys.metaView,
   permissionKeys.metaManage,
   permissionKeys.metaPagesManage,
+  permissionKeys.whatsappManage,
+  permissionKeys.whatsappViewLogs,
 ]
 
 const roleSeeds = [

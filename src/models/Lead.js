@@ -19,6 +19,8 @@ function defineLead(sequelize) {
     metaLeadId: { type: DataTypes.STRING(128), allowNull: true },
     campaignId: { type: DataTypes.STRING(128), allowNull: false, defaultValue: '' },
     campaignName: { type: DataTypes.STRING(255), allowNull: false, defaultValue: '' },
+    facebookPageId: { type: DataTypes.STRING(128), allowNull: false, defaultValue: '' },
+    facebookPageName: { type: DataTypes.STRING(255), allowNull: false, defaultValue: '' },
     statusId: { type: DataTypes.CHAR(36), allowNull: false },
     primaryAgentId: { type: DataTypes.CHAR(36), allowNull: true },
     secondaryAgentId: { type: DataTypes.CHAR(36), allowNull: true },

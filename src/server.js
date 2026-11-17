@@ -17,9 +17,19 @@ const { companyRouter } = require('./modules/company/companyRoutes')
 const { leadRouter } = require('./modules/leads/leadRoutes')
 const { metaRouter } = require('./modules/meta/metaRoutes')
 const { metaWebhookRouter } = require('./modules/meta/metaWebhookRoutes')
+const { whatsappRouter } = require('./modules/whatsapp/whatsappRoutes')
+const { whatsappWebhookRouter } = require('./modules/whatsapp/whatsappWebhookRoutes')
 const { publicRouter } = require('./routes/publicRoutes')
 const { warnMailProviderAtStartup } = require('./services/mailService')
 const { startLeadWorker, stopLeadWorker } = require('./services/metaLeadService')
+const {
+  startEmailReportWorker,
+  stopEmailReportWorker,
+} = require('./services/emailReportService')
+const {
+  startWhatsAppOutboxWorker,
+  stopWhatsAppOutboxWorker,
+} = require('./services/whatsappOutboxService')
 const { assertMetaEncryptionKey } = require('./utils/metaSecrets')
 
 // Tests may omit the key in process env; provide a fixed 32-byte hex for NODE_ENV=test only.
@@ -39,8 +49,9 @@ app.use(cors({
   credentials: true,
 }))
 
-// Meta webhook must see exact raw bytes before JSON parsing.
+// Meta + WhatsApp webhooks must see exact raw bytes before JSON parsing.
 app.use('/api/meta', metaWebhookRouter)
+app.use('/api/whatsapp', whatsappWebhookRouter)
 
 app.use(express.json({ limit: '1mb' }))
 app.use(cookieParser())
@@ -64,14 +75,15 @@ app.use('/api/catalog', catalogRouter)
 app.use('/api/company', companyRouter)
 app.use('/api/leads', leadRouter)
 app.use('/api/meta', metaRouter)
+app.use('/api/whatsapp', whatsappRouter)
 
 app.get('/api', (req, res) => {
   res.status(200).json({
     data: {
       product: 'Harmoniq Creative CRM',
-      phase: 'meta-foundation',
+      phase: 'whatsapp-webhooks',
       orm: 'sequelize',
-      message: 'Auth, Users, Roles, Catalog, Company, Leads and Meta Integration APIs are available.',
+      message: 'Auth, Users, Roles, Catalog, Company, Leads, Meta and WhatsApp Integration APIs are available.',
     },
   })
 })
@@ -89,6 +101,8 @@ async function start() {
   }
 
   startLeadWorker()
+  startEmailReportWorker()
+  startWhatsAppOutboxWorker()
 
   app.listen(env.port, () => {
     console.log(`Harmoniq Creative CRM API listening on port ${env.port}`)
@@ -101,6 +115,8 @@ if (require.main === module) {
 
 process.on('SIGINT', async () => {
   stopLeadWorker()
+  stopEmailReportWorker()
+  stopWhatsAppOutboxWorker()
   await closeDatabase()
   process.exit(0)
 })

@@ -21,10 +21,13 @@ const {
   leadSorts,
   leadSources,
   roleScopes,
+  whatsappWorkflowKeys,
 } = require('../utils/enums')
 const { AppError, errors } = require('../utils/errors')
 const { messages } = require('../utils/messages')
 const { isUuid, readText } = require('../utils/helpers')
+const assignmentNotifications = require('./assignmentNotificationService')
+const whatsappAssignmentNotifications = require('./whatsappAssignmentNotificationService')
 
 /**
  * Lead CRUD, scope, assignment, notes/feedback/activities — legacy leadService parity.
@@ -240,6 +243,8 @@ async function createLead(auth, body) {
   const metaLeadId = readText(body, 'metaLeadId') || null
   const campaignId = readText(body, 'campaignId')
   const campaignName = readText(body, 'campaignName')
+  const facebookPageId = readText(body, 'facebookPageId')
+  const facebookPageName = readText(body, 'facebookPageName')
 
   try {
     const lead = await createLeadWithRetry({
@@ -256,10 +261,57 @@ async function createLead(auth, body) {
       metaLeadId,
       campaignId,
       campaignName,
+      facebookPageId,
+      facebookPageName,
       company,
       nextFollowUpAt,
       feedbacks,
     })
+    if (lead.primaryAgentId) {
+      let assignedByName = ''
+      if (auth.user && auth.user.name) {
+        assignedByName = auth.user.name
+      }
+      if (metaLeadId || scalars.source === leadSources.facebook) {
+        assignedByName = assignmentNotifications.META_ASSIGNED_BY
+      }
+      try {
+        assignmentNotifications.notifyLeadPrimaryAssignment({
+          companyId: auth.companyId,
+          leadId: lead.id,
+          previousPrimaryAgentId: null,
+          newPrimaryAgentId: lead.primaryAgentId,
+          assignedByName,
+          contactName: lead.name,
+          contactNumber: lead.phone,
+          emailKind: assignmentNotifications.EMAIL_KINDS.newLead,
+        })
+      } catch (_error) {
+        // Lead already created; New Lead email must never fail this request.
+      }
+      try {
+        await whatsappAssignmentNotifications.notifyLeadPrimaryWhatsApp({
+          companyId: auth.companyId,
+          leadId: lead.id,
+          previousPrimaryAgentId: null,
+          newPrimaryAgentId: lead.primaryAgentId,
+          actorUserId: auth.userId,
+          contactName: lead.name,
+          contactNumber: lead.phone,
+          campaignName: lead.campaignName || '',
+          facebookPageName: lead.facebookPageName || '',
+          workflowKey: whatsappWorkflowKeys.metaAssign,
+          emailKind: assignmentNotifications.EMAIL_KINDS.newLead,
+          idempotencyKey: whatsappAssignmentNotifications.buildMetaAssignIdempotencyKey({
+            companyId: auth.companyId,
+            leadId: lead.id,
+            primaryAgentId: lead.primaryAgentId,
+          }),
+        })
+      } catch (_error) {
+        // Lead already created; WhatsApp W1 must never fail this request.
+      }
+    }
     const full = await findLeadInScope(auth, lead.id)
     const [row] = await presentLeads(auth, [full])
     return { message: messages.leadCreated, lead: row }
@@ -290,6 +342,8 @@ async function createLeadWithRetry(context, attempt = 0) {
     metaLeadId,
     campaignId,
     campaignName,
+    facebookPageId,
+    facebookPageName,
     company,
     nextFollowUpAt,
     feedbacks,
@@ -308,6 +362,8 @@ async function createLeadWithRetry(context, attempt = 0) {
         metaLeadId,
         campaignId: campaignId || '',
         campaignName: campaignName || '',
+        facebookPageId: facebookPageId || '',
+        facebookPageName: facebookPageName || '',
         statusId: status.id,
         primaryAgentId: agents.primary ? agents.primary.id : null,
         secondaryAgentId: agents.secondary ? agents.secondary.id : null,
@@ -454,44 +510,129 @@ async function updateLead(auth, leadId, body) {
 async function assignLead(auth, leadId, body) {
   const { sequelize, LeadTransfer } = getModels()
   const lead = await findLeadInScope(auth, leadId)
-  const reason = readLimitedText(body, 'reason')
-  if (!reason) {
-    throw new AppError(errors.transferReasonRequired, 400)
+  // Transfer reason is optional; empty string matches allowNull:false on lead_transfers.reason.
+  let reason = ''
+  if (Object.prototype.hasOwnProperty.call(body || {}, 'reason')) {
+    reason = readLimitedText(body, 'reason')
   }
   const primaryId = readText(body, 'primaryAgentId')
   if (!primaryId) {
     throw new AppError(errors.primaryAgentRequired, 400)
   }
   const primary = await readAgent(auth, primaryId)
-  let secondary = null
-  if (Object.prototype.hasOwnProperty.call(body, 'secondaryAgentId')) {
-    secondary = await readAgent(auth, readText(body, 'secondaryAgentId'))
-  } else if (lead.secondaryAgentId) {
-    secondary = await readAgent(auth, String(lead.secondaryAgentId))
+  if (lead.primaryAgentId && String(lead.primaryAgentId) === String(primary.id)) {
+    throw new AppError(errors.transferSameAgent, 400)
   }
-  if (secondary && primary.id === secondary.id) {
-    throw new AppError(errors.agentsMustDiffer, 400)
+  // Transfer UI only changes primary. Preserve secondary unless it would equal the new primary.
+  let secondary = null
+  if (lead.secondaryAgentId && String(lead.secondaryAgentId) !== String(primary.id)) {
+    secondary = await readAgent(auth, String(lead.secondaryAgentId))
   }
   const placement = readPlacement(auth, primary)
   const previousPrimaryAgentId = lead.primaryAgentId
+  const isFirstPrimaryAssign = !previousPrimaryAgentId
 
+  let previousAgentName = ''
+  if (previousPrimaryAgentId) {
+    try {
+      const previousAgent = await readAgent(auth, String(previousPrimaryAgentId))
+      if (previousAgent && previousAgent.name) {
+        previousAgentName = previousAgent.name
+      }
+    } catch (_error) {
+      previousAgentName = ''
+    }
+  }
+
+  const transferId = uuidv4()
+  const secondaryId = secondary ? secondary.id : null
   await sequelize.transaction(async (transaction) => {
     await LeadTransfer.create({
-      id: uuidv4(),
+      id: transferId,
       companyId: auth.companyId,
       leadId: lead.id,
       previousPrimaryAgentId: previousPrimaryAgentId || null,
       primaryAgentId: primary.id,
-      secondaryAgentId: secondary ? secondary.id : null,
+      secondaryAgentId: secondaryId,
       reason,
       transferredBy: auth.userId,
     }, { transaction })
     lead.primaryAgentId = primary.id
-    lead.secondaryAgentId = secondary ? secondary.id : null
+    lead.secondaryAgentId = secondaryId
     lead.branchId = placement.branchId
     lead.teamId = placement.teamId
     await lead.save({ transaction })
   })
+
+  let assignerName = ''
+  if (auth.user && auth.user.name) {
+    assignerName = auth.user.name
+  }
+  try {
+    // assignLead is the transfer API: email only for A→B (shouldNotifyTransfer).
+    // null→A must not send a new_lead email (that belongs to createLead / Meta create).
+    assignmentNotifications.notifyLeadPrimaryAssignment({
+      companyId: auth.companyId,
+      leadId: lead.id,
+      previousPrimaryAgentId,
+      newPrimaryAgentId: primary.id,
+      assignedByName: assignerName,
+      contactName: lead.name,
+      contactNumber: lead.phone,
+      transferReason: reason,
+      previousAgentName,
+      emailKind: assignmentNotifications.EMAIL_KINDS.transfer,
+    })
+  } catch (_error) {
+    // Assignment already saved; notification must never fail this request.
+  }
+  // WhatsApp only after the assignment transaction committed.
+  // First primary assign (null → A) via Transfer uses W1; A → B uses W2.
+  try {
+    if (isFirstPrimaryAssign) {
+      await whatsappAssignmentNotifications.notifyLeadPrimaryWhatsApp({
+        companyId: auth.companyId,
+        leadId: lead.id,
+        previousPrimaryAgentId: null,
+        newPrimaryAgentId: primary.id,
+        actorUserId: auth.userId,
+        contactName: lead.name,
+        contactNumber: lead.phone,
+        campaignName: lead.campaignName || '',
+        facebookPageName: lead.facebookPageName || '',
+        workflowKey: whatsappWorkflowKeys.metaAssign,
+        emailKind: assignmentNotifications.EMAIL_KINDS.newLead,
+        idempotencyKey: whatsappAssignmentNotifications.buildMetaAssignIdempotencyKey({
+          companyId: auth.companyId,
+          leadId: lead.id,
+          primaryAgentId: primary.id,
+        }),
+      })
+    } else {
+      await whatsappAssignmentNotifications.notifyLeadPrimaryWhatsApp({
+        companyId: auth.companyId,
+        leadId: lead.id,
+        previousPrimaryAgentId,
+        newPrimaryAgentId: primary.id,
+        transferId,
+        actorUserId: auth.userId,
+        contactName: lead.name,
+        contactNumber: lead.phone,
+        campaignName: lead.campaignName || '',
+        facebookPageName: lead.facebookPageName || '',
+        workflowKey: whatsappWorkflowKeys.transfer,
+        emailKind: assignmentNotifications.EMAIL_KINDS.transfer,
+        idempotencyKey: whatsappAssignmentNotifications.buildTransferIdempotencyKey({
+          companyId: auth.companyId,
+          leadId: lead.id,
+          transferId,
+          primaryAgentId: primary.id,
+        }),
+      })
+    }
+  } catch (_error) {
+    // Assignment already saved; WhatsApp must never fail this request.
+  }
 
   const full = await findLeadInScope(auth, lead.id)
   const [row] = await presentLeads(auth, [full])
@@ -563,6 +704,8 @@ module.exports = {
   assignLead,
   deleteLead,
   leadScopeFilter,
+  buildLeadQuery,
+  presentLeads,
   presentLead,
   isOverdue,
   calendarDate,

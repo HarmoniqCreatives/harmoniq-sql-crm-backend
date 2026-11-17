@@ -18,6 +18,10 @@ const {
   startPageLeadSync,
 } = require('../../services/metaLeadService')
 const {
+  getMetaDefaultAssignee,
+  updateMetaDefaultAssignee,
+} = require('../../services/metaAssigneeService')
+const {
   acceptWebhookPayload,
   verifyWebhookChallenge,
   verifyWebhookSignature,
@@ -165,16 +169,33 @@ async function getLeadCounts(req, res) {
   })
 }
 
+async function getDefaultAssignee(req, res) {
+  const result = await getMetaDefaultAssignee(req.auth)
+  res.status(200).json({ data: result })
+}
+
+async function patchDefaultAssignee(req, res) {
+  const result = await updateMetaDefaultAssignee(req.auth, req.body || {})
+  res.status(200).json({
+    data: {
+      message: messages.metaDefaultAssigneeUpdated,
+      ...result,
+    },
+  })
+}
+
 module.exports = {
   deleteProfile,
   getAvailablePages,
   getConnections,
+  getDefaultAssignee,
   getLeadCounts,
   getOAuthCallback,
   getPages,
   getProfiles,
   getSyncJob,
   getWebhook,
+  patchDefaultAssignee,
   patchProfile,
   postConnectionPages,
   postDisconnectConnection,

@@ -184,9 +184,32 @@ function logMailSendError(kind, error, provider) {
   }))
 }
 
+function normalizeMailAttachments(attachments) {
+  if (!attachments || !Array.isArray(attachments)) {
+    return []
+  }
+  return attachments.map((item) => {
+    const filename = item && item.filename ? String(item.filename) : 'attachment.csv'
+    const content = item && item.content !== undefined && item.content !== null
+      ? item.content
+      : ''
+    const contentType = item && item.contentType ? String(item.contentType) : 'text/csv'
+    return { filename, content, contentType }
+  })
+}
+
+function normalizeRecipientList(to) {
+  if (Array.isArray(to)) {
+    return to.map((item) => String(item || '').trim()).filter(Boolean)
+  }
+  const single = String(to || '').trim()
+  return single ? [single] : []
+}
+
 async function sendViaMemory(payload) {
   memoryOutbox.push({
     ...payload,
+    attachments: normalizeMailAttachments(payload.attachments),
     at: new Date().toISOString(),
   })
   return { messageId: `memory-${memoryOutbox.length}` }
@@ -210,10 +233,22 @@ async function sendViaSmtp(payload) {
       pass: String(process.env.SMTP_PASS).replace(/\s+/g, ''),
     },
   })
-  return withTimeout(transport.sendMail({
-    ...payload,
+  const files = normalizeMailAttachments(payload.attachments)
+  const mail = {
+    to: payload.to,
+    subject: payload.subject,
+    text: payload.text,
+    html: payload.html,
     from: process.env.MAIL_FROM,
-  }), MAIL_TIMEOUT_MS)
+  }
+  if (files.length > 0) {
+    mail.attachments = files.map((file) => ({
+      filename: file.filename,
+      content: file.content,
+      contentType: file.contentType,
+    }))
+  }
+  return withTimeout(transport.sendMail(mail), MAIL_TIMEOUT_MS)
 }
 
 async function sendViaResend(payload) {
@@ -221,19 +256,30 @@ async function sendViaResend(payload) {
   if (!apiKey || !process.env.MAIL_FROM) {
     throw new AppError(errors.mailNotConfigured, 503)
   }
+  const recipients = normalizeRecipientList(payload.to)
+  const body = {
+    from: process.env.MAIL_FROM,
+    to: recipients,
+    subject: payload.subject,
+    text: payload.text,
+    html: payload.html,
+  }
+  const files = normalizeMailAttachments(payload.attachments)
+  if (files.length > 0) {
+    body.attachments = files.map((file) => ({
+      filename: file.filename,
+      content: Buffer.isBuffer(file.content)
+        ? file.content.toString('base64')
+        : Buffer.from(String(file.content), 'utf8').toString('base64'),
+    }))
+  }
   const response = await withTimeout(fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      from: process.env.MAIL_FROM,
-      to: [payload.to],
-      subject: payload.subject,
-      text: payload.text,
-      html: payload.html,
-    }),
+    body: JSON.stringify(body),
   }), MAIL_TIMEOUT_MS)
 
   if (!response.ok) {
@@ -241,8 +287,8 @@ async function sendViaResend(payload) {
     error.code = `RESEND_${response.status}`
     throw error
   }
-  const body = await response.json().catch(() => ({}))
-  return { messageId: body.id || '' }
+  const responseBody = await response.json().catch(() => ({}))
+  return { messageId: responseBody.id || '' }
 }
 
 async function sendMail(kind, payload) {
@@ -341,6 +387,109 @@ async function sendInvitationEmail(details) {
   return { link }
 }
 
+const DEFAULT_NEW_LEAD_SUBJECT = 'New Lead Assigned – Harmoniq CRM'
+const DEFAULT_TRANSFER_SUBJECT = 'Lead Transferred to You – Harmoniq CRM'
+
+function assignmentIntroLine(emailKind) {
+  if (emailKind === 'transfer') {
+    return 'A lead has been transferred to you.'
+  }
+  return 'A new lead has been assigned to you.'
+}
+
+function buildAssignmentMessageText(details) {
+  const lines = [
+    'Hello,',
+    '',
+    assignmentIntroLine(details.emailKind),
+    '',
+    `Assigned By: ${details.assignedBy || ''}`,
+    `Contact Name: ${details.contactName || ''}`,
+    `Number: ${details.contactNumber || ''}`,
+  ]
+  if (details.emailKind === 'transfer') {
+    if (details.previousAgentName) {
+      lines.push(`Previous Agent: ${details.previousAgentName}`)
+    }
+    if (details.transferReason) {
+      lines.push(`Transfer Reason: ${details.transferReason}`)
+    }
+  }
+  lines.push('', 'Please contact the lead and follow up.', '', 'Regards,', 'Harmoniq CRM')
+  return lines.join('\n')
+}
+
+function buildAssignmentMessageHtml(details) {
+  const transferBits = []
+  if (details.emailKind === 'transfer') {
+    if (details.previousAgentName) {
+      transferBits.push(`Previous Agent: ${escapeHtml(details.previousAgentName)}<br>`)
+    }
+    if (details.transferReason) {
+      transferBits.push(`Transfer Reason: ${escapeHtml(details.transferReason)}<br>`)
+    }
+  }
+  return [
+    '<p>Hello,</p>',
+    `<p>${escapeHtml(assignmentIntroLine(details.emailKind))}</p>`,
+    `<p>Assigned By: ${escapeHtml(details.assignedBy || '')}<br>`,
+    `Contact Name: ${escapeHtml(details.contactName || '')}<br>`,
+    `Number: ${escapeHtml(details.contactNumber || '')}<br>`,
+    ...transferBits,
+    '</p>',
+    '<p>Please contact the lead and follow up.</p>',
+    '<p>Regards,<br>Harmoniq CRM</p>',
+  ].join('')
+}
+
+function resolveAssignmentEmailSubject(details) {
+  if (details && details.subject && String(details.subject).trim()) {
+    return String(details.subject).trim()
+  }
+  if (details && details.emailKind === 'transfer') {
+    return DEFAULT_TRANSFER_SUBJECT
+  }
+  return DEFAULT_NEW_LEAD_SUBJECT
+}
+
+/**
+ * Sends new-lead or transfer assignment email via the configured provider.
+ * @param {object} details
+ */
+async function sendAssignmentEmail(details) {
+  const text = buildAssignmentMessageText(details)
+  const html = buildAssignmentMessageHtml(details)
+  const subject = resolveAssignmentEmailSubject(details)
+  await sendMail('assignment', {
+    to: details.to,
+    subject,
+    text,
+    html,
+  })
+}
+
+/**
+ * Sends a scheduled lead report to one or more recipients with CSV attachments.
+ * @param {object} details
+ */
+async function sendDailyLeadReportEmail(details) {
+  if (!details || typeof details !== 'object') {
+    throw new AppError(errors.mailNotConfigured, 503)
+  }
+  const recipients = normalizeRecipientList(details.recipients)
+  if (recipients.length === 0) {
+    throw new AppError(errors.emailReportRecipientsInvalid, 400)
+  }
+  await sendMail('email_report', {
+    to: recipients,
+    subject: details.subject || 'Lead report',
+    text: details.text || '',
+    html: details.html || '',
+    attachments: details.attachments || [],
+  })
+  return { provider: readMailProvider() || 'smtp' }
+}
+
 function getMemoryOutbox() {
   return memoryOutbox.slice()
 }
@@ -356,9 +505,17 @@ module.exports = {
   sendVerificationEmail,
   sendPasswordResetEmail,
   sendInvitationEmail,
+  sendAssignmentEmail,
+  sendDailyLeadReportEmail,
+  resolveAssignmentEmailSubject,
+  buildAssignmentMessageText,
+  buildAssignmentMessageHtml,
+  DEFAULT_NEW_LEAD_SUBJECT,
+  DEFAULT_TRANSFER_SUBJECT,
   shortMailError,
   warnMailProviderAtStartup,
   getMemoryOutbox,
   clearMemoryOutbox,
+  normalizeMailAttachments,
   isMailConfigured: isSmtpConfigured,
 }

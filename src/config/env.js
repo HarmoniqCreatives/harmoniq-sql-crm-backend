@@ -1,4 +1,5 @@
 const dotenv = require('dotenv')
+const { resolveDatabaseConfig } = require('./dbEnv')
 
 dotenv.config()
 
@@ -15,9 +16,14 @@ function readEnv() {
   if (!Number.isFinite(trustProxyHops) || trustProxyHops < 0) {
     throw new Error('TRUST_PROXY_HOPS must be a non-negative number (never true).')
   }
+
+  // DB_* (including DB_NAME) come only from environment — no hardcoded database names.
+  const db = resolveDatabaseConfig(process.env)
+
   return {
     port: Number(process.env.PORT || 5001),
-    nodeEnv: process.env.NODE_ENV || 'development',
+    nodeEnv: db.nodeEnv,
+    dbEnv: db.dbEnv,
     frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5174',
     appBaseUrl: process.env.APP_BASE_URL || '',
     jwtAccessSecret: required('JWT_ACCESS_SECRET'),
@@ -31,13 +37,13 @@ function readEnv() {
     metaWebhookVerifyToken: process.env.META_WEBHOOK_VERIFY_TOKEN || '',
     metaGraphApiVersion: process.env.META_GRAPH_API_VERSION || process.env.META_GRAPH_VERSION || 'v21.0',
     db: {
-      host: process.env.DB_HOST || '127.0.0.1',
-      port: Number(process.env.DB_PORT || 3306),
-      name: process.env.DB_NAME || 'harmoniq_creative_crm',
-      user: process.env.DB_USER || 'harmoniq',
-      password: process.env.DB_PASSWORD || '',
-      dialect: 'mysql',
-      logging: process.env.DB_LOGGING === '1',
+      host: db.host,
+      port: db.port,
+      name: db.name,
+      user: db.user,
+      password: db.password,
+      dialect: db.dialect,
+      logging: db.logging,
     },
   }
 }

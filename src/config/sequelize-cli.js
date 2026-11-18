@@ -1,20 +1,30 @@
+'use strict'
+
 require('dotenv').config()
 
-const shared = {
-  username: process.env.DB_USER || 'harmoniq',
-  password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'harmoniq_creative_crm',
-  host: process.env.DB_HOST || '127.0.0.1',
-  port: Number(process.env.DB_PORT || 3306),
-  dialect: 'mysql',
-  logging: false,
+const { resolveDatabaseConfig } = require('./dbEnv')
+
+/**
+ * Shared Sequelize CLI config for Local and Production.
+ * Uses the same env-driven resolveDatabaseConfig as the runtime app (DB_NAME from .env).
+ */
+function buildConfig() {
+  const db = resolveDatabaseConfig(process.env)
+  return {
+    username: db.user,
+    password: db.password,
+    database: db.name,
+    host: db.host,
+    port: db.port,
+    dialect: db.dialect,
+    logging: false,
+  }
 }
+
+const shared = buildConfig()
 
 module.exports = {
   development: { ...shared },
-  test: {
-    ...shared,
-    database: process.env.DB_NAME_TEST || 'harmoniq_creative_crm_test',
-  },
+  test: { ...shared },
   production: { ...shared },
 }

@@ -27,6 +27,7 @@ const {
   loadCompanyTeam,
 } = require('./accessService')
 const { revokeAllUserSessions } = require('./tokenService')
+const { throwIfInitialSuperAdminConflict } = require('./initialSuperAdminGuard')
 
 /**
  * User directory service. All queries are scoped by `auth.companyId`.
@@ -234,6 +235,7 @@ async function createUser(auth, body) {
       user: (await getUser(auth, user.id)).user,
     }
   } catch (error) {
+    throwIfInitialSuperAdminConflict(error)
     if (error.name === 'SequelizeUniqueConstraintError') {
       throw new AppError(errors.emailTaken, 409)
     }

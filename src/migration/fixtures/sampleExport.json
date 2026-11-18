@@ -1,0 +1,161 @@
+{
+  "meta": {
+    "exportedAt": "2026-11-17T00:00:00.000Z",
+    "scope": ["companies", "roles", "users"],
+    "source": "synthetic-fixture"
+  },
+  "companyActiveHints": {
+    "aaaaaaaaaaaaaaaaaaaaaaaa": true,
+    "bbbbbbbbbbbbbbbbbbbbbbbb": false
+  },
+  "passwordGate": {
+    "passed": false,
+    "testedAt": null
+  },
+  "companies": [
+    {
+      "_id": "aaaaaaaaaaaaaaaaaaaaaaaa",
+      "name": "Falcon Premier",
+      "nameKey": "falcon premier",
+      "timezone": "Asia/Dubai",
+      "baseCurrency": "AED",
+      "enabledCurrencies": ["AED", "INR", "PKR"],
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z"
+    },
+    {
+      "_id": "bbbbbbbbbbbbbbbbbbbbbbbb",
+      "name": "Pending Co",
+      "nameKey": "pending co",
+      "timezone": "Asia/Kolkata",
+      "baseCurrency": "INR",
+      "enabledCurrencies": ["INR"],
+      "createdAt": "2024-06-01T00:00:00.000Z",
+      "updatedAt": "2024-06-01T00:00:00.000Z"
+    }
+  ],
+  "roles": [
+    {
+      "_id": "role11111111111111111111",
+      "companyId": "aaaaaaaaaaaaaaaaaaaaaaaa",
+      "key": "super_admin",
+      "name": "Super Admin",
+      "description": "Full system administration",
+      "permissions": ["leads.view", "users.manage"],
+      "scope": "company",
+      "isSystem": true,
+      "isProtected": true,
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z"
+    },
+    {
+      "_id": "role22222222222222222222",
+      "companyId": "aaaaaaaaaaaaaaaaaaaaaaaa",
+      "key": "admin",
+      "name": "Admin",
+      "description": "Manage users",
+      "permissions": [
+        "users.manage",
+        "roles.manage",
+        "leads.view",
+        "leads.edit",
+        "meta.manage",
+        "reports.view",
+        "settings.manage"
+      ],
+      "scope": "company",
+      "isSystem": true,
+      "isProtected": false,
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z"
+    },
+    {
+      "_id": "role33333333333333333333",
+      "companyId": "aaaaaaaaaaaaaaaaaaaaaaaa",
+      "key": "agent",
+      "name": "Agent",
+      "description": "Work leads",
+      "permissions": ["leads.view", "leads.edit", "activities.manage"],
+      "scope": "own",
+      "isSystem": true,
+      "isProtected": false,
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z"
+    },
+    {
+      "_id": "role44444444444444444444",
+      "companyId": "bbbbbbbbbbbbbbbbbbbbbbbb",
+      "key": "super_admin",
+      "name": "Super Admin",
+      "description": "Full system administration",
+      "permissions": ["users.view"],
+      "scope": "company",
+      "isSystem": true,
+      "isProtected": true,
+      "createdAt": "2024-06-01T00:00:00.000Z",
+      "updatedAt": "2024-06-01T00:00:00.000Z"
+    }
+  ],
+  "users": [
+    {
+      "_id": "user11111111111111111111",
+      "companyId": "aaaaaaaaaaaaaaaaaaaaaaaa",
+      "roleId": "role11111111111111111111",
+      "name": "Owner One",
+      "email": "owner@falcon.example",
+      "phone": "+971500000001",
+      "passwordHash": "$2b$04$ZCj5Jdky6w/9VBEFaQ93JOD.R2mBKA3oeytrN69.Z0Q68wkBYx.Ru",
+      "status": "active",
+      "emailVerified": true,
+      "isInitialSuperAdmin": true,
+      "isPlatformOperator": false,
+      "lastLoginAt": "2024-12-01T00:00:00.000Z",
+      "disabledAt": null,
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z"
+    },
+    {
+      "_id": "user22222222222222222222",
+      "companyId": "aaaaaaaaaaaaaaaaaaaaaaaa",
+      "roleId": "role22222222222222222222",
+      "name": "Admin Two",
+      "email": "admin@falcon.example",
+      "phone": null,
+      "passwordHash": "$2b$04$ZCj5Jdky6w/9VBEFaQ93JOD.R2mBKA3oeytrN69.Z0Q68wkBYx.Ru",
+      "status": "active",
+      "isInitialSuperAdmin": false,
+      "isPlatformOperator": false,
+      "createdAt": "2024-02-01T00:00:00.000Z",
+      "updatedAt": "2024-02-01T00:00:00.000Z"
+    },
+    {
+      "_id": "user33333333333333333333",
+      "companyId": "aaaaaaaaaaaaaaaaaaaaaaaa",
+      "roleId": "role33333333333333333333",
+      "name": "Agent Three",
+      "email": "agent@falcon.example",
+      "passwordHash": "$2b$04$ZCj5Jdky6w/9VBEFaQ93JOD.R2mBKA3oeytrN69.Z0Q68wkBYx.Ru",
+      "status": "disabled",
+      "emailVerified": true,
+      "isInitialSuperAdmin": false,
+      "isPlatformOperator": false,
+      "disabledAt": "2024-10-01T00:00:00.000Z",
+      "createdAt": "2024-03-01T00:00:00.000Z",
+      "updatedAt": "2024-10-01T00:00:00.000Z"
+    },
+    {
+      "_id": "user44444444444444444444",
+      "companyId": "bbbbbbbbbbbbbbbbbbbbbbbb",
+      "roleId": "role44444444444444444444",
+      "name": "Pending Owner",
+      "email": "owner@pending.example",
+      "passwordHash": "$2b$04$ZCj5Jdky6w/9VBEFaQ93JOD.R2mBKA3oeytrN69.Z0Q68wkBYx.Ru",
+      "status": "active",
+      "emailVerified": false,
+      "isInitialSuperAdmin": true,
+      "isPlatformOperator": false,
+      "createdAt": "2024-06-01T00:00:00.000Z",
+      "updatedAt": "2024-06-01T00:00:00.000Z"
+    }
+  ]
+}

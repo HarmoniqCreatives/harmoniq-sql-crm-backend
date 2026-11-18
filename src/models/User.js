@@ -13,6 +13,7 @@ const { userStatuses } = require('../utils/enums')
  *
  * Constraints:
  * - unique (companyId, email)
+ * - at most one isInitialSuperAdmin=true per company (DB generated unique key; migration)
  *
  * @param {import('sequelize').Sequelize} sequelize
  * @returns {import('sequelize').ModelStatic}

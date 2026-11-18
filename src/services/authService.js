@@ -32,6 +32,8 @@ const {
   revokeRefreshToken,
   rotateRefreshToken,
 } = require('./tokenService')
+const { findUserForPreAuthEmail } = require('./authEmailResolution')
+const { throwIfInitialSuperAdminConflict } = require('./initialSuperAdminGuard')
 
 /**
  * Authentication service: company registration, verification, login, and password reset.
@@ -230,6 +232,7 @@ async function registerCompany(body) {
       userId = user.id
     })
   } catch (error) {
+    throwIfInitialSuperAdminConflict(error)
     if (error.name === 'SequelizeUniqueConstraintError') {
       const fields = error.fields || {}
       if (fields.nameKey || Object.keys(fields).includes('nameKey')) {
@@ -320,11 +323,8 @@ async function resendVerification(body) {
   if (!email || !isEmail(email)) {
     throw new AppError(errors.emailInvalid, 400)
   }
-  const where = { email, emailVerified: false }
-  if (companyId) {
-    where.companyId = companyId
-  }
-  const user = await User.findOne({ where })
+  // Shared emails across tenants must pick a company — never send for the first match.
+  const user = await findUserForPreAuthEmail(User, email, companyId, { emailVerified: false })
   if (!user) {
     return { message: messages.verificationResent }
   }
@@ -500,11 +500,8 @@ async function forgotPassword(body) {
   if (!email || !isEmail(email)) {
     return { message: messages.resetEmailSent }
   }
-  const where = { email }
-  if (companyId) {
-    where.companyId = companyId
-  }
-  const user = await User.findOne({ where })
+  // Shared emails across tenants must pick a company — never reset the first match.
+  const user = await findUserForPreAuthEmail(User, email, companyId)
   if (!user) {
     return { message: messages.resetEmailSent }
   }

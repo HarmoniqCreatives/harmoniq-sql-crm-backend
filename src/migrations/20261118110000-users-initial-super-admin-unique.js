@@ -3,9 +3,14 @@
 /**
  * P2: Enforce at most one isInitialSuperAdmin=true user per company.
  *
- * Generated column holds companyId only when isInitialSuperAdmin is true;
- * otherwise NULL. Unique index allows many non-initial users (NULL not unique
- * in MySQL) while blocking a second initial Super Admin in the same company.
+ * VIRTUAL generated column holds companyId only when isInitialSuperAdmin is true;
+ * otherwise NULL. Unique secondary index allows many non-initial users (NULL is
+ * not unique in MySQL) while blocking a second initial Super Admin in the same
+ * company.
+ *
+ * VIRTUAL (not STORED) is required on MySQL 8.4 / InnoDB because users.companyId
+ * has ON UPDATE/DELETE CASCADE to companies.id, and CASCADE is forbidden on a
+ * base column of a STORED generated column.
  *
  * SAFETY:
  * - Does not demote, delete, or transfer users.
@@ -50,7 +55,7 @@ module.exports = {
       ADD COLUMN ${COLUMN_NAME} CHAR(36)
       GENERATED ALWAYS AS (
         CASE WHEN isInitialSuperAdmin = 1 THEN companyId ELSE NULL END
-      ) STORED
+      ) VIRTUAL
     `)
 
     await queryInterface.addIndex('users', [COLUMN_NAME], {

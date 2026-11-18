@@ -26,6 +26,11 @@ const {
   listLeadCounts,
   presentSyncJob,
 } = require('./metaLeadService')
+const {
+  findForeignConnectedOwner,
+  isConnectedPageOwnershipConflict,
+  ownershipConflictReason,
+} = require('./metaPageOwnership')
 
 function presentProfile(profile) {
   let appId = profile.appId || ''
@@ -628,16 +633,28 @@ async function listAvailablePages(auth, connectionId) {
     throw error
   }
 
-  const connected = await MetaPage.findAll({
-    where: {
-      companyId: auth.companyId,
-      status: metaPageStatuses.connected,
-    },
-    attributes: ['pageId'],
-  })
-  const connectedIds = new Set(connected.map((row) => row.pageId))
+  const [ownConnected, foreignConnected] = await Promise.all([
+    MetaPage.findAll({
+      where: {
+        companyId: auth.companyId,
+        status: metaPageStatuses.connected,
+      },
+      attributes: ['pageId'],
+    }),
+    MetaPage.findAll({
+      where: {
+        companyId: { [Op.ne]: auth.companyId },
+        status: metaPageStatuses.connected,
+      },
+      attributes: ['pageId'],
+    }),
+  ])
+  const unavailableIds = new Set([
+    ...ownConnected.map((row) => row.pageId),
+    ...foreignConnected.map((row) => row.pageId),
+  ])
   return graphPages
-    .filter((page) => !connectedIds.has(String(page.id)))
+    .filter((page) => !unavailableIds.has(String(page.id)))
     .map((page) => ({
       pageId: String(page.id),
       name: page.name || String(page.id),
@@ -691,6 +708,16 @@ async function connectSelectedPages(auth, connectionId, body) {
 
     try {
       const outcome = await sequelize.transaction(async (transaction) => {
+        const foreignOwner = await findForeignConnectedOwner(
+          MetaPage,
+          pageId,
+          auth.companyId,
+          { transaction },
+        )
+        if (foreignOwner) {
+          return { pageId, status: 'skipped', reason: ownershipConflictReason() }
+        }
+
         let page = await MetaPage.findOne({
           where: { companyId: auth.companyId, pageId },
           transaction,
@@ -716,6 +743,7 @@ async function connectSelectedPages(auth, connectionId, body) {
             lastError: '',
           }, { transaction })
         } else {
+          // Same-company reconnect of a disconnected / expired / inaccessible row.
           page.connectionId = connection.id
           page.appProfileId = connection.appProfileId
           page.metaUserId = connection.metaUserId
@@ -793,6 +821,10 @@ async function connectSelectedPages(auth, connectionId, body) {
         results.push(outcome)
       }
     } catch (error) {
+      if (isConnectedPageOwnershipConflict(error)) {
+        results.push({ pageId, status: 'skipped', reason: ownershipConflictReason() })
+        continue
+      }
       if (error.name === 'SequelizeUniqueConstraintError') {
         results.push({ pageId, status: 'skipped', reason: errors.metaPageAlreadyConnected })
         continue

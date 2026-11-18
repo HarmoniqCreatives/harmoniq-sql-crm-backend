@@ -1,9 +1,9 @@
 const crypto = require('crypto')
 const { v4: uuidv4 } = require('uuid')
 const { getModels } = require('../models')
-const { metaPageStatuses, metaWebhookIngestionStatuses } = require('../utils/enums')
+const { metaWebhookIngestionStatuses } = require('../utils/enums')
 const { messages } = require('../utils/messages')
-const { decryptSecret } = require('../utils/metaSecrets')
+const { findCanonicalConnectedPage } = require('./metaPageOwnership')
 
 function tokensMatch(left, right) {
   const actual = Buffer.from(String(left))
@@ -39,99 +39,28 @@ function verifyWebhookChallenge(query) {
   return challenge
 }
 
-function extractPageIdsFromRaw(rawBody) {
-  const ids = new Set()
-  let text = ''
-  try {
-    text = Buffer.isBuffer(rawBody) ? rawBody.toString('utf8') : String(rawBody || '')
-    const payload = JSON.parse(text)
-    if (payload && Array.isArray(payload.entry)) {
-      for (const entry of payload.entry) {
-        if (entry && entry.id) ids.add(String(entry.id))
-        if (entry && Array.isArray(entry.changes)) {
-          for (const change of entry.changes) {
-            if (change && change.value && change.value.page_id) {
-              ids.add(String(change.value.page_id))
-            }
-          }
-        }
-      }
-    }
-  } catch {
-    return []
-  }
-  return [...ids]
-}
-
-/**
- * Collects candidate App Secrets for signature verification.
- * Prefer secrets belonging to profiles that own the webhook's page IDs.
- */
-async function readCandidateSecrets(rawBody) {
-  const { MetaAppProfile, MetaPage } = getModels()
-  const secrets = []
-  const pageIds = extractPageIdsFromRaw(rawBody)
-
-  if (process.env.META_APP_SECRET) {
-    secrets.push(process.env.META_APP_SECRET)
-  }
-
-  let profileIds = null
-  if (pageIds.length > 0) {
-    const pages = await MetaPage.findAll({
-      where: { pageId: pageIds },
-      attributes: ['appProfileId', 'companyId'],
-    })
-    profileIds = [...new Set(pages.map((row) => row.appProfileId).filter(Boolean))]
-  }
-
-  const where = { secretStored: true, isActive: true }
-  if (profileIds && profileIds.length > 0) {
-    where.id = profileIds
-  }
-
-  const profiles = await MetaAppProfile.findAll({ where })
-  for (const profile of profiles) {
-    if (!profile.appSecretCipher) continue
-    try {
-      secrets.push(decryptSecret(profile.appSecretCipher))
-    } catch {
-      // Skip undecryptable secrets without failing the whole check.
-    }
-  }
-
-  // If page-scoped profiles yielded nothing, fall back to all stored customer secrets.
-  if (profileIds && profileIds.length > 0 && secrets.length <= (process.env.META_APP_SECRET ? 1 : 0)) {
-    const all = await MetaAppProfile.findAll({ where: { secretStored: true, isActive: true } })
-    for (const profile of all) {
-      if (!profile.appSecretCipher) continue
-      try {
-        secrets.push(decryptSecret(profile.appSecretCipher))
-      } catch {
-        // ignore
-      }
-    }
-  }
-
-  return [...new Set(secrets)]
-}
-
 /**
  * Verifies X-Hub-Signature-256 against the exact raw body bytes.
+ * Uses ONLY the central Meta Developer App Secret (META_APP_SECRET).
+ * Never uses company/customer App Secrets for webhook HMAC.
  */
-async function verifyWebhookSignature(rawBody, header) {
+function verifyWebhookSignature(rawBody, header) {
   if (!Buffer.isBuffer(rawBody)) return false
   if (!header || typeof header !== 'string') return false
   if (!header.startsWith('sha256=')) return false
-  const secrets = await readCandidateSecrets(rawBody)
-  for (const secret of secrets) {
-    const digest = crypto.createHmac('sha256', secret).update(rawBody).digest('hex')
-    const expected = `sha256=${digest}`
-    if (tokensMatch(header, expected)) {
-      return true
-    }
+
+  const secret = process.env.META_APP_SECRET
+  if (!secret || typeof secret !== 'string' || !secret.trim()) {
+    console.error(JSON.stringify({
+      event: 'meta_webhook_signature_misconfigured',
+      reason: 'META_APP_SECRET_missing',
+    }))
+    return false
   }
-  return false
+
+  const digest = crypto.createHmac('sha256', secret).update(rawBody).digest('hex')
+  const expected = `sha256=${digest}`
+  return tokensMatch(header, expected)
 }
 
 function readLeadgenEvents(payload) {
@@ -181,19 +110,15 @@ async function insertIngestionOnce(fields) {
 /**
  * Persists signed leadgen events. Connected Pages → status `pending` (worker imports).
  * Unknown Pages → status `ignored` with null companyId (no Graph / no lead create).
+ * Routes only to the canonical connected Page owner (oldest row if duplicates remain).
  * Dedupe key matches manual Sync Now so webhook + sync races stay safe.
  */
 async function acceptWebhookPayload(payload) {
   const { MetaPage } = getModels()
   const events = readLeadgenEvents(payload)
   for (const event of events) {
-    const pages = await MetaPage.findAll({
-      where: {
-        pageId: event.pageId,
-        status: metaPageStatuses.connected,
-      },
-    })
-    if (pages.length === 0) {
+    const page = await findCanonicalConnectedPage(MetaPage, event.pageId)
+    if (!page) {
       await insertIngestionOnce({
         id: uuidv4(),
         companyId: null,
@@ -207,19 +132,17 @@ async function acceptWebhookPayload(payload) {
       })
       continue
     }
-    for (const page of pages) {
-      await insertIngestionOnce({
-        id: uuidv4(),
-        companyId: page.companyId,
-        metaPageId: page.id,
-        connectionId: page.connectionId,
-        pageId: event.pageId,
-        leadgenId: event.leadgenId,
-        formId: event.formId,
-        dedupeKey: buildDedupeKey(page.companyId, event.pageId, event.leadgenId),
-        status: metaWebhookIngestionStatuses.pending,
-      })
-    }
+    await insertIngestionOnce({
+      id: uuidv4(),
+      companyId: page.companyId,
+      metaPageId: page.id,
+      connectionId: page.connectionId,
+      pageId: event.pageId,
+      leadgenId: event.leadgenId,
+      formId: event.formId,
+      dedupeKey: buildDedupeKey(page.companyId, event.pageId, event.leadgenId),
+      status: metaWebhookIngestionStatuses.pending,
+    })
   }
 }
 

@@ -305,21 +305,46 @@ async function getLead(auth, leadId) {
 /**
  * @param {object} auth
  * @param {object} body
+ * @param {{ metaImport?: boolean }} [options]
+ *   metaImport: Meta Lead Ads sync path only — softens optional validations and
+ *   never treats post-insert presentation/notification failures as create failure.
  * @returns {Promise<{ message: string, lead: object }>}
  */
-async function createLead(auth, body) {
+async function createLead(auth, body, options = {}) {
+  const metaImport = options.metaImport === true
   const { sequelize, Lead, LeadTag, LeadFeedback, Company } = getModels()
-  const scalars = validateLeadScalars(body, { requireCore: true })
+  const scalars = validateLeadScalars(body, {
+    requireCore: true,
+    softOptional: metaImport,
+  })
   const status = await readStatus(auth, body)
-  const tags = await readTags(auth, body)
-  const agents = await readAgents(auth, body)
+  let tags = []
+  if (metaImport) {
+    try {
+      tags = await readTags(auth, body)
+    } catch {
+      tags = []
+    }
+  } else {
+    tags = await readTags(auth, body)
+  }
+  const agents = await readAgents(auth, body, { softOptional: metaImport })
   const company = await Company.findByPk(auth.companyId)
   if (!company) {
     throw new AppError(errors.companyMissing, 500)
   }
   const placement = readPlacement(auth, agents.primary)
-  const nextFollowUpAt = readFollowUp(body, company.timezone)
-  const feedbacks = readFeedback(body)
+  let nextFollowUpAt = null
+  if (metaImport) {
+    try {
+      nextFollowUpAt = readFollowUp(body, company.timezone)
+    } catch {
+      nextFollowUpAt = null
+    }
+  } else {
+    nextFollowUpAt = readFollowUp(body, company.timezone)
+  }
+  const feedbacks = readFeedback(body, { softOptional: metaImport })
   const metaLeadId = readText(body, 'metaLeadId') || null
   const campaignId = readText(body, 'campaignId')
   const campaignName = readText(body, 'campaignName')
@@ -404,13 +429,35 @@ async function createLead(auth, body) {
         // Lead already created; WhatsApp W1 must never fail this request.
       }
     }
-    const full = await findLeadInScope(auth, lead.id)
-    const [row] = await presentLeads(auth, [full])
-    return { message: messages.leadCreated, lead: row }
+    try {
+      const full = await findLeadInScope(auth, lead.id)
+      // Prefer exports so tests can stub presentation without failing Meta import.
+      const present = module.exports.presentLeads || presentLeads
+      const [row] = await present(auth, [full])
+      return { message: messages.leadCreated, lead: row }
+    } catch (presentError) {
+      if (metaImport) {
+        // DB insert already succeeded; Meta import must not be marked failed.
+        return {
+          message: messages.leadCreated,
+          lead: {
+            id: lead.id,
+            name: lead.name,
+            phone: lead.phone,
+            email: lead.email,
+            source: lead.source,
+            metaLeadId: lead.metaLeadId,
+          },
+        }
+      }
+      throw presentError
+    }
   } catch (error) {
     if (error.name === 'SequelizeUniqueConstraintError') {
       const fields = error.fields || {}
-      if (fields.metaLeadId || fields.companyId_metaLeadId || String(error.message || '').includes('meta')) {
+      const fieldNames = Object.keys(fields).join(' ')
+      const detail = `${fieldNames} ${error.message || ''} ${error.parent?.sqlMessage || ''}`
+      if (/meta/i.test(detail)) {
         throw new AppError(errors.metaLeadDuplicate, 409)
       }
       throw new AppError(errors.leadNumberConflict, 409)

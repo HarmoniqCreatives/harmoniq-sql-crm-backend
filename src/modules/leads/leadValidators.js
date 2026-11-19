@@ -53,6 +53,27 @@ function readEnum(body, fieldName, values, message, fallback) {
 }
 
 /**
+ * Like readEnum, but invalid values fall back instead of throwing.
+ * Used by Meta import so optional enums never block lead creation.
+ *
+ * @param {object} body
+ * @param {string} fieldName
+ * @param {Record<string, string>} values
+ * @param {string} fallback
+ * @returns {string}
+ */
+function softReadEnum(body, fieldName, values, fallback) {
+  const value = readText(body, fieldName)
+  if (!value) {
+    return fallback
+  }
+  if (!Object.values(values).includes(value)) {
+    return fallback
+  }
+  return value
+}
+
+/**
  * @param {object} body
  * @param {string} fieldName
  * @returns {string}
@@ -63,6 +84,24 @@ function readLimitedText(body, fieldName) {
     throw new AppError(errors.valueTooLong, 400)
   }
   return text
+}
+
+/**
+ * Truncates overlong optional text instead of rejecting (Meta import).
+ *
+ * @param {object} body
+ * @param {string} fieldName
+ * @returns {string}
+ */
+function softReadLimitedText(body, fieldName) {
+  const text = readText(body, fieldName)
+  if (!text) {
+    return ''
+  }
+  if (text.length <= textLimit) {
+    return text
+  }
+  return text.slice(0, textLimit)
 }
 
 /**
@@ -162,22 +201,46 @@ async function readAgent(auth, agentId) {
  * @param {object} body
  * @returns {Promise<{ primary: object|null, secondary: object|null }>}
  */
-async function readAgents(auth, body) {
+async function readAgents(auth, body, options = {}) {
+  const softOptional = options.softOptional === true
   let primaryId = readText(body, 'primaryAgentId')
   const secondaryId = readText(body, 'secondaryAgentId')
   if (!auth.role?.isProtected && auth.role?.scope === roleScopes.own) {
     if (primaryId) {
       if (primaryId !== auth.userId) {
-        throw new AppError(errors.outsideScope, 403)
+        if (softOptional) {
+          primaryId = auth.userId || ''
+        } else {
+          throw new AppError(errors.outsideScope, 403)
+        }
       }
     } else {
       primaryId = auth.userId
     }
   }
-  const primary = await readAgent(auth, primaryId)
-  const secondary = await readAgent(auth, secondaryId)
+  let primary = null
+  let secondary = null
+  if (softOptional) {
+    try {
+      primary = await readAgent(auth, primaryId)
+    } catch {
+      primary = null
+    }
+    try {
+      secondary = await readAgent(auth, secondaryId)
+    } catch {
+      secondary = null
+    }
+  } else {
+    primary = await readAgent(auth, primaryId)
+    secondary = await readAgent(auth, secondaryId)
+  }
   if (primary && secondary && primary.id === secondary.id) {
-    throw new AppError(errors.agentsMustDiffer, 400)
+    if (softOptional) {
+      secondary = null
+    } else {
+      throw new AppError(errors.agentsMustDiffer, 400)
+    }
   }
   return { primary, secondary }
 }
@@ -204,9 +267,11 @@ function readPlacement(auth, primary) {
 
 /**
  * @param {object} body
+ * @param {{ softOptional?: boolean }} [options]
  * @returns {{ type: string, text: string, createdAt: Date }[]}
  */
-function readFeedback(body) {
+function readFeedback(body, options = {}) {
+  const softOptional = options.softOptional === true
   if (!Object.prototype.hasOwnProperty.call(body, 'feedback')) {
     return []
   }
@@ -215,16 +280,25 @@ function readFeedback(body) {
     return []
   }
   if (typeof feedback !== 'object' || Array.isArray(feedback)) {
+    if (softOptional) {
+      return []
+    }
     throw new AppError(errors.feedbackInvalid, 400)
   }
-  const text = readText(feedback, 'text')
+  let text = readText(feedback, 'text')
   if (!text) {
     return []
   }
   if (!isWithinLength(text, feedbackTextLimit)) {
-    throw new AppError(errors.valueTooLong, 400)
+    if (softOptional) {
+      text = text.slice(0, feedbackTextLimit)
+    } else {
+      throw new AppError(errors.valueTooLong, 400)
+    }
   }
-  const type = readEnum(feedback, 'type', feedbackTypes, errors.feedbackTypeInvalid, feedbackTypes.general)
+  const type = softOptional
+    ? softReadEnum(feedback, 'type', feedbackTypes, feedbackTypes.general)
+    : readEnum(feedback, 'type', feedbackTypes, errors.feedbackTypeInvalid, feedbackTypes.general)
   return [{ type, text, createdAt: new Date() }]
 }
 
@@ -325,13 +399,16 @@ async function readActivity(auth, body, timeZone) {
 
 /**
  * Validates core scalar fields shared by create (required) and edit (partial).
+ * When softOptional is true (Meta import only), optional fields use blanks/defaults
+ * instead of rejecting; name and phone remain mandatory when requireCore is true.
  *
  * @param {object} body
- * @param {{ requireCore: boolean }} options
+ * @param {{ requireCore?: boolean, softOptional?: boolean }} options
  * @returns {object}
  */
 function validateLeadScalars(body, options = { requireCore: true }) {
   const requireCore = options.requireCore !== false
+  const softOptional = options.softOptional === true
   const result = {}
 
   if (requireCore || Object.prototype.hasOwnProperty.call(body, 'name')) {
@@ -361,47 +438,68 @@ function validateLeadScalars(body, options = { requireCore: true }) {
     } else {
       const email = normalizeEmail(emailText)
       if (!isEmail(email)) {
-        throw new AppError(errors.emailInvalid, 400)
+        if (softOptional) {
+          result.email = ''
+        } else {
+          throw new AppError(errors.emailInvalid, 400)
+        }
+      } else {
+        result.email = email
       }
-      result.email = email
     }
   }
 
   if (requireCore || Object.prototype.hasOwnProperty.call(body, 'source')) {
-    result.source = readEnum(body, 'source', leadSources, errors.leadSourceInvalid, leadSources.manual)
+    result.source = softOptional
+      ? softReadEnum(body, 'source', leadSources, leadSources.facebook)
+      : readEnum(body, 'source', leadSources, errors.leadSourceInvalid, leadSources.manual)
   }
   if (requireCore || Object.prototype.hasOwnProperty.call(body, 'propertyType')) {
-    result.propertyType = readEnum(
-      body,
-      'propertyType',
-      propertyTypes,
-      errors.leadPropertyInvalid,
-      propertyTypes.apartment,
-    )
+    result.propertyType = softOptional
+      ? softReadEnum(body, 'propertyType', propertyTypes, propertyTypes.apartment)
+      : readEnum(
+        body,
+        'propertyType',
+        propertyTypes,
+        errors.leadPropertyInvalid,
+        propertyTypes.apartment,
+      )
   }
   if (requireCore || Object.prototype.hasOwnProperty.call(body, 'purpose')) {
-    result.purpose = readEnum(body, 'purpose', leadPurposes, errors.leadPurposeInvalid, leadPurposes.buy)
+    result.purpose = softOptional
+      ? softReadEnum(body, 'purpose', leadPurposes, leadPurposes.buy)
+      : readEnum(body, 'purpose', leadPurposes, errors.leadPurposeInvalid, leadPurposes.buy)
   }
   if (requireCore || Object.prototype.hasOwnProperty.call(body, 'readiness')) {
-    result.readiness = readEnum(
-      body,
-      'readiness',
-      readinessValues,
-      errors.leadReadinessInvalid,
-      readinessValues.readyToMove,
-    )
+    result.readiness = softOptional
+      ? softReadEnum(body, 'readiness', readinessValues, readinessValues.readyToMove)
+      : readEnum(
+        body,
+        'readiness',
+        readinessValues,
+        errors.leadReadinessInvalid,
+        readinessValues.readyToMove,
+      )
   }
   if (requireCore || Object.prototype.hasOwnProperty.call(body, 'location')) {
-    result.location = readLimitedText(body, 'location')
+    result.location = softOptional
+      ? softReadLimitedText(body, 'location')
+      : readLimitedText(body, 'location')
   }
   if (requireCore || Object.prototype.hasOwnProperty.call(body, 'budget')) {
-    result.budget = readLimitedText(body, 'budget')
+    result.budget = softOptional
+      ? softReadLimitedText(body, 'budget')
+      : readLimitedText(body, 'budget')
   }
   if (requireCore || Object.prototype.hasOwnProperty.call(body, 'builtUpArea')) {
-    result.builtUpArea = readLimitedText(body, 'builtUpArea')
+    result.builtUpArea = softOptional
+      ? softReadLimitedText(body, 'builtUpArea')
+      : readLimitedText(body, 'builtUpArea')
   }
   if (requireCore || Object.prototype.hasOwnProperty.call(body, 'carpetArea')) {
-    result.carpetArea = readLimitedText(body, 'carpetArea')
+    result.carpetArea = softOptional
+      ? softReadLimitedText(body, 'carpetArea')
+      : readLimitedText(body, 'carpetArea')
   }
   return result
 }
@@ -411,7 +509,9 @@ module.exports = {
   textLimit,
   maxTagIds,
   readEnum,
+  softReadEnum,
   readLimitedText,
+  softReadLimitedText,
   readStatus,
   readTags,
   readAgent,

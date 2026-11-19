@@ -131,27 +131,59 @@ function makeDedupeKey(companyId, pageId, leadgenId) {
   return `${companyId}:${pageId}:${leadgenId}`
 }
 
+/**
+ * Company-scoped actor for Meta import.
+ * Prefers Initial Super Admin, then any active protected super-admin user,
+ * then any active company user. Does not require ISA solely to import.
+ */
 async function companyActor(companyId) {
   const { User, Role, Company } = getModels()
   const company = await Company.findByPk(companyId)
+  if (!company) {
+    throw new AppError(errors.companyMissing, 500)
+  }
   const role = await Role.findOne({
     where: { companyId, key: roleKeys.superAdmin, isProtected: true },
   })
-  const user = await User.findOne({
+  if (!role) {
+    throw new AppError(errors.roleNotFound, 500)
+  }
+  let user = await User.findOne({
     where: {
       companyId,
       isInitialSuperAdmin: true,
       status: userStatuses.active,
     },
   })
-  if (!company || !role || !user) {
-    throw new AppError(errors.roleNotFound, 500)
+  if (!user) {
+    user = await User.findOne({
+      where: {
+        companyId,
+        roleId: role.id,
+        status: userStatuses.active,
+      },
+      order: [['createdAt', 'ASC']],
+    })
+  }
+  if (!user) {
+    user = await User.findOne({
+      where: {
+        companyId,
+        status: userStatuses.active,
+      },
+      order: [['createdAt', 'ASC']],
+    })
   }
   return {
-    userId: user.id,
+    userId: user ? user.id : null,
     companyId,
     roleId: role.id,
-    user,
+    user: user || {
+      id: null,
+      name: messages.metaLeadNoteSourceFacebook,
+      branchId: null,
+      teamId: null,
+    },
     role,
     company,
   }
@@ -490,7 +522,7 @@ async function processIngestion(ingestion, graph) {
     if (primaryAgentId) {
       createBody.primaryAgentId = primaryAgentId
     }
-    const result = await createLead(actor, createBody)
+    const result = await createLead(actor, createBody, { metaImport: true })
     ingestion.status = metaWebhookIngestionStatuses.imported
     ingestion.leadId = result.lead.id
     ingestion.lastError = ''
@@ -538,12 +570,49 @@ async function processIngestion(ingestion, graph) {
       await ingestion.save()
       return ingestion
     }
-    if (error.message === errors.phoneInvalid || error.message === errors.nameRequired) {
+    if (
+      error.message === errors.phoneInvalid
+      || error.message === errors.phoneRequired
+      || error.message === errors.nameRequired
+    ) {
       ingestion.status = metaWebhookIngestionStatuses.failed
       ingestion.lastError = errors.metaLeadIncomplete
       ingestion.retryCount = security.metaLeadRetryLimit
       await ingestion.save()
       return ingestion
+    }
+    // If a lead row already exists for this metaLeadId, do not mark the
+    // ingestion failed (covers post-insert presentation errors and any
+    // duplicate-create race that did not map to metaLeadDuplicate).
+    try {
+      const { Lead } = getModels()
+      const existing = await Lead.findOne({
+        where: { companyId: ingestion.companyId, metaLeadId: ingestion.leadgenId },
+      })
+      if (existing) {
+        const duplicateLike = error.message === errors.leadNumberConflict
+          || /meta/i.test(String(error.message || ''))
+          || error.name === 'SequelizeUniqueConstraintError'
+        ingestion.status = duplicateLike
+          ? metaWebhookIngestionStatuses.skipped
+          : metaWebhookIngestionStatuses.imported
+        ingestion.leadId = existing.id
+        ingestion.lastError = ''
+        ingestion.formId = mapped.formId
+        ingestion.formName = formName
+        ingestion.pageName = page.name
+        ingestion.campaignId = mapped.campaignId
+        ingestion.campaignName = campaignName
+        ingestion.adSetId = mapped.adSetId
+        ingestion.adSetName = adSetName
+        ingestion.adId = mapped.adId
+        ingestion.adName = adName
+        if (facebookCreatedAt) ingestion.facebookCreatedAt = facebookCreatedAt
+        await ingestion.save()
+        return ingestion
+      }
+    } catch (_lookupError) {
+      // Fall through to retry/fail handling.
     }
     ingestion.retryCount += 1
     ingestion.lastError = errors.requestFailed

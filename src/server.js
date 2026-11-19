@@ -23,6 +23,10 @@ const { publicRouter } = require('./routes/publicRoutes')
 const { warnMailProviderAtStartup } = require('./services/mailService')
 const { startLeadWorker, stopLeadWorker } = require('./services/metaLeadService')
 const {
+  startMetaAutoSyncScheduler,
+  stopMetaAutoSyncScheduler,
+} = require('./services/metaAutoSyncService')
+const {
   startEmailReportWorker,
   stopEmailReportWorker,
 } = require('./services/emailReportService')
@@ -31,12 +35,14 @@ const {
   stopWhatsAppOutboxWorker,
 } = require('./services/whatsappOutboxService')
 const { assertMetaEncryptionKey } = require('./utils/metaSecrets')
+const { assertMetaAutoSyncConfig } = require('./config/metaAutoSync')
 
 // Tests may omit the key in process env; provide a fixed 32-byte hex for NODE_ENV=test only.
 if (process.env.NODE_ENV === 'test' && !process.env.META_TOKEN_ENCRYPTION_KEY) {
   process.env.META_TOKEN_ENCRYPTION_KEY = Buffer.alloc(32, 9).toString('hex')
 }
 assertMetaEncryptionKey()
+assertMetaAutoSyncConfig()
 
 const env = readEnv()
 const app = express()
@@ -101,6 +107,7 @@ async function start() {
   }
 
   startLeadWorker()
+  startMetaAutoSyncScheduler()
   startEmailReportWorker()
   startWhatsAppOutboxWorker()
 
@@ -115,6 +122,7 @@ if (require.main === module) {
 
 process.on('SIGINT', async () => {
   stopLeadWorker()
+  stopMetaAutoSyncScheduler()
   stopEmailReportWorker()
   stopWhatsAppOutboxWorker()
   await closeDatabase()

@@ -138,6 +138,7 @@ const errors = {
   metaPermissionsIncomplete: 'Required Facebook permissions were declined.',
   metaSubscribeFailed: 'The Page could not be subscribed to leadgen webhooks.',
   metaFormsPermissionMissing: 'The Facebook account is missing permission to read Lead Forms. Reconnect Facebook and grant leads_retrieval.',
+  metaAdAccountNotFound: 'No Meta ad account was found for this Facebook connection. Grant ads_read and ensure an ad account is linked to the Page or Business.',
   metaLeadIncomplete: 'That Facebook lead is missing a name or valid phone number.',
   metaSyncFailed: 'Facebook lead sync failed.',
   metaSyncInvalidSince: 'Enter a valid sync start date.',

@@ -379,9 +379,88 @@ async function readLead(accessToken, leadgenId) {
 }
 
 async function readLeadgenForms(accessToken, pageId, options = {}) {
-  return readPagedEdge(accessToken, `${pageId}/leadgen_forms`, 'id,name', {
+  const fields = options.fields || 'id,name,status,locale,leads_count,created_time'
+  return readPagedEdge(accessToken, `${pageId}/leadgen_forms`, fields, {
     ...options,
     purpose: 'forms',
+  })
+}
+
+/**
+ * Lists ad accounts visible to the user token (ads_read).
+ * @returns {Promise<Array<object>>}
+ */
+async function readUserAdAccounts(accessToken, options = {}) {
+  return readPagedEdge(
+    accessToken,
+    'me/adaccounts',
+    options.fields || 'id,account_id,name,account_status,currency',
+    { ...options, purpose: 'ads' },
+  )
+}
+
+/**
+ * Best-effort: page → business → owned/client ad accounts.
+ * @returns {Promise<Array<object>>}
+ */
+async function readPageBusinessAdAccounts(accessToken, pageId, options = {}) {
+  if (!pageId) return []
+  const url = new URL(`https://graph.facebook.com/${readGraphVersion()}/${pageId}`)
+  url.searchParams.set(
+    'fields',
+    'business{id,name,owned_ad_accounts{id,account_id,name,account_status},client_ad_accounts{id,account_id,name,account_status}}',
+  )
+  url.searchParams.set('access_token', accessToken)
+  try {
+    const response = await fetchImpl(url)
+    const payload = await readGraphPayload(response, { purpose: 'ads', ...options })
+    const business = payload && payload.business ? payload.business : null
+    if (!business) return []
+    const owned = business.owned_ad_accounts && Array.isArray(business.owned_ad_accounts.data)
+      ? business.owned_ad_accounts.data
+      : []
+    const client = business.client_ad_accounts && Array.isArray(business.client_ad_accounts.data)
+      ? business.client_ad_accounts.data
+      : []
+    return [...owned, ...client]
+  } catch {
+    return []
+  }
+}
+
+/**
+ * @param {string} accessToken
+ * @param {string} adAccountId act_… or numeric
+ * @param {object} [options]
+ */
+async function readAdAccountCampaigns(accessToken, adAccountId, options = {}) {
+  if (!adAccountId) return []
+  const actId = String(adAccountId).startsWith('act_')
+    ? String(adAccountId)
+    : `act_${adAccountId}`
+  const fields = options.fields
+    || 'id,name,effective_status,status,objective,updated_time'
+  return readPagedEdge(accessToken, `${actId}/campaigns`, fields, {
+    ...options,
+    purpose: 'ads',
+  })
+}
+
+/**
+ * @param {string} accessToken
+ * @param {string} adAccountId
+ * @param {object} [options]
+ */
+async function readAdAccountAds(accessToken, adAccountId, options = {}) {
+  if (!adAccountId) return []
+  const actId = String(adAccountId).startsWith('act_')
+    ? String(adAccountId)
+    : `act_${adAccountId}`
+  const fields = options.fields
+    || 'id,name,effective_status,status,campaign_id,adset_id,updated_time'
+  return readPagedEdge(accessToken, `${actId}/ads`, fields, {
+    ...options,
+    purpose: 'ads',
   })
 }
 
@@ -410,22 +489,26 @@ async function readObjectName(accessToken, objectId) {
 
 /**
  * Reads campaign name + effective_status. Failures return empty values (non-fatal).
- * @returns {Promise<{ name: string, effectiveStatus: string }>}
+ * @returns {Promise<{ name: string, effectiveStatus: string, errorCode: string }>}
  */
 async function readCampaign(accessToken, campaignId) {
-  if (!campaignId) return { name: '', effectiveStatus: '' }
+  if (!campaignId) return { name: '', effectiveStatus: '', errorCode: '' }
   const url = new URL(`https://graph.facebook.com/${readGraphVersion()}/${campaignId}`)
   url.searchParams.set('fields', 'name,effective_status')
   url.searchParams.set('access_token', accessToken)
   try {
     const response = await fetchImpl(url)
-    const payload = await readGraphPayload(response, { purpose: 'leads' })
+    const payload = await readGraphPayload(response, { purpose: 'ads' })
     return {
       name: payload.name ? String(payload.name) : '',
       effectiveStatus: payload.effective_status ? String(payload.effective_status) : '',
+      errorCode: '',
     }
-  } catch {
-    return { name: '', effectiveStatus: '' }
+  } catch (error) {
+    let errorCode = 'META_GRAPH_ERROR'
+    if (error && error.code) errorCode = String(error.code)
+    else if (error && error.message) errorCode = String(error.message).slice(0, 80)
+    return { name: '', effectiveStatus: '', errorCode }
   }
 }
 
@@ -435,6 +518,8 @@ module.exports = {
   exchangeEmbeddedSignupCode,
   exchangeLongLivedToken,
   listWhatsAppPhoneNumbers,
+  readAdAccountAds,
+  readAdAccountCampaigns,
   readFacebookPages,
   readFacebookUser,
   readFormLeads,
@@ -444,7 +529,9 @@ module.exports = {
   readLeadgenForms,
   readObjectName,
   readCampaign,
+  readPageBusinessAdAccounts,
   readPagedEdge,
+  readUserAdAccounts,
   readWhatsAppBusinessAccount,
   resetFetchImpl,
   setFetchImpl,

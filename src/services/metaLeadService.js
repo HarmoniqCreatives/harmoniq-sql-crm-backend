@@ -17,11 +17,13 @@ const {
 const { AppError, errors } = require('../utils/errors')
 const { messages } = require('../utils/messages')
 const {
-  isInternationalPhone,
   isUuid,
-  normalizePhone,
   readText,
 } = require('../utils/helpers')
+const {
+  metaPhoneDebugEvent,
+  normalizeMetaLeadPhone,
+} = require('../utils/metaPhone')
 const { decryptSecret } = require('../utils/metaSecrets')
 const graphClient = require('./metaGraph')
 const { createLead } = require('./leadService')
@@ -91,16 +93,47 @@ function mapLeadFields(graphLead) {
     const last = readField(fieldData, ['last_name', 'last name'])
     name = `${first} ${last}`.trim()
   }
-  const phone = normalizePhone(readField(fieldData, ['phone_number', 'phone', 'mobile_number', 'mobile']))
+  const phoneRaw = readField(fieldData, ['phone_number', 'phone', 'mobile_number', 'mobile'])
   const email = readField(fieldData, ['email'])
   return {
     name,
-    phone,
+    phoneRaw,
     email,
     formId: graphLead.form_id ? String(graphLead.form_id) : '',
     campaignId: graphLead.campaign_id ? String(graphLead.campaign_id) : '',
     adSetId: graphLead.adset_id ? String(graphLead.adset_id) : '',
     adId: graphLead.ad_id ? String(graphLead.ad_id) : '',
+  }
+}
+
+/**
+ * Graph / sync fatals that must abort the batch — never treat as a single-lead miss.
+ * @param {unknown} error
+ * @returns {boolean}
+ */
+function isFatalMetaGraphError(error) {
+  if (!error || !error.message) return false
+  return error.message === errors.metaTokenExpired
+    || error.message === errors.metaTokenInvalid
+    || error.message === errors.metaPermissionMissing
+    || error.message === errors.metaFormsPermissionMissing
+    || error.message === errors.metaRateLimited
+}
+
+/**
+ * Marks an ingestion failed without throwing (batch isolation helper).
+ * @param {object|null} ingestion
+ * @param {string} message
+ */
+async function markIngestionFailedSafe(ingestion, message) {
+  if (!ingestion) return
+  try {
+    ingestion.status = metaWebhookIngestionStatuses.failed
+    ingestion.lastError = message || errors.requestFailed
+    ingestion.retryCount = security.metaLeadRetryLimit
+    await ingestion.save()
+  } catch (_saveError) {
+    // Isolation path must not throw past the lead boundary.
   }
 }
 
@@ -377,7 +410,7 @@ async function getPageLeadSyncJob(auth, pageId, jobId) {
 
 async function processIngestion(ingestion, graph) {
   const client = graph || graphClient
-  const { MetaPage, CatalogItem, MetaWebhookIngestion } = getModels()
+  const { MetaPage, CatalogItem, Company } = getModels()
   const page = await MetaPage.findOne({
     where: { id: ingestion.metaPageId, pageId: ingestion.pageId },
   })
@@ -441,7 +474,17 @@ async function processIngestion(ingestion, graph) {
   }
 
   const mapped = mapLeadFields(graphLead)
-  if (!mapped.name || !isInternationalPhone(mapped.phone)) {
+  const company = await Company.findByPk(ingestion.companyId)
+  const phoneResult = normalizeMetaLeadPhone(mapped.phoneRaw, {
+    timezone: company ? company.timezone : '',
+    baseCurrency: company ? company.baseCurrency : '',
+  })
+  console.log(JSON.stringify(metaPhoneDebugEvent(phoneResult, {
+    companyId: ingestion.companyId || '',
+    leadgenId: ingestion.leadgenId || '',
+  })))
+  mapped.phone = phoneResult.ok ? phoneResult.phone : ''
+  if (!mapped.name || !phoneResult.ok) {
     ingestion.status = metaWebhookIngestionStatuses.failed
     ingestion.lastError = errors.metaLeadIncomplete
     ingestion.retryCount = security.metaLeadRetryLimit
@@ -470,11 +513,63 @@ async function processIngestion(ingestion, graph) {
   let adSetName = ''
   let adName = ''
   let formName = ''
-  if (client.readCampaign) {
-    const campaign = await client.readCampaign(token, mapped.campaignId)
+  if (mapped.campaignId && client.readCampaign) {
+    let campaign = await client.readCampaign(token, mapped.campaignId)
     campaignName = campaign.name || ''
     campaignStatus = campaign.effectiveStatus || ''
-  } else if (client.readObjectName) {
+    // Page tokens often cannot read Marketing API campaign objects — retry with user token.
+    if ((!campaignName || !campaignStatus) && page.connectionId) {
+      try {
+        const { MetaConnection } = getModels()
+        const connection = await MetaConnection.findOne({
+          where: {
+            id: page.connectionId,
+            companyId: ingestion.companyId,
+            status: metaConnectionStatuses.connected,
+          },
+        })
+        if (connection && connection.tokenCipher) {
+          const userToken = decryptSecret(connection.tokenCipher)
+          const retry = await client.readCampaign(userToken, mapped.campaignId)
+          if (retry.name) campaignName = retry.name
+          if (retry.effectiveStatus) campaignStatus = retry.effectiveStatus
+          if (!campaignName && !campaignStatus) {
+            console.error(JSON.stringify({
+              event: 'meta_campaign_enrichment_failed',
+              companyId: ingestion.companyId,
+              leadgenId: ingestion.leadgenId,
+              campaignId: mapped.campaignId,
+              tokenKind: 'user',
+              errorCode: retry.errorCode || campaign.errorCode || 'EMPTY_CAMPAIGN',
+            }))
+          }
+        } else if (campaign.errorCode) {
+          console.error(JSON.stringify({
+            event: 'meta_campaign_enrichment_failed',
+            companyId: ingestion.companyId,
+            leadgenId: ingestion.leadgenId,
+            campaignId: mapped.campaignId,
+            tokenKind: 'page',
+            errorCode: campaign.errorCode,
+          }))
+        }
+      } catch (enrichError) {
+        let errorCode = 'ENRICHMENT_ERROR'
+        if (enrichError && enrichError.code) errorCode = String(enrichError.code)
+        else if (enrichError && enrichError.message) {
+          errorCode = String(enrichError.message).slice(0, 80)
+        }
+        console.error(JSON.stringify({
+          event: 'meta_campaign_enrichment_failed',
+          companyId: ingestion.companyId,
+          leadgenId: ingestion.leadgenId,
+          campaignId: mapped.campaignId,
+          tokenKind: 'user',
+          errorCode,
+        }))
+      }
+    }
+  } else if (mapped.campaignId && client.readObjectName) {
     campaignName = await client.readObjectName(token, mapped.campaignId)
   }
   if (client.readObjectName) {
@@ -667,8 +762,23 @@ async function queueGraphLead(page, graphLead, graph, companyId) {
   }
   existing.status = metaWebhookIngestionStatuses.processing
   await existing.save()
-  await processIngestion(existing, graph)
-  return existing.status
+  try {
+    const runIngestion = module.exports.processIngestion || processIngestion
+    await runIngestion(existing, graph)
+    return existing.status
+  } catch (error) {
+    if (isFatalMetaGraphError(error)) {
+      throw error
+    }
+    await markIngestionFailedSafe(existing, errors.requestFailed)
+    console.error(JSON.stringify({
+      event: 'meta_lead_isolation_caught',
+      companyId: companyId || '',
+      leadgenId: leadgenId || '',
+      message: error && error.message ? String(error.message).slice(0, 200) : 'unknown',
+    }))
+    return metaWebhookIngestionStatuses.failed
+  }
 }
 
 async function syncPageLeads(auth, pageId, body, graph, progress) {
@@ -738,7 +848,23 @@ async function syncPageLeads(auth, pageId, body, graph, progress) {
     for (const graphLead of leads) {
       if (leadIsBefore(graphLead, since)) continue
       leadsSeen += 1
-      const outcome = await queueGraphLead(page, graphLead, client, auth.companyId)
+      let outcome = metaWebhookIngestionStatuses.failed
+      try {
+        outcome = await queueGraphLead(page, graphLead, client, auth.companyId)
+      } catch (error) {
+        // Token / permission / rate-limit must fail the job — do not swallow.
+        if (isFatalMetaGraphError(error)) {
+          throw error
+        }
+        outcome = metaWebhookIngestionStatuses.failed
+        const leadgenId = graphLead && graphLead.id ? String(graphLead.id) : ''
+        console.error(JSON.stringify({
+          event: 'meta_sync_lead_isolation_caught',
+          companyId: auth.companyId || '',
+          leadgenId,
+          message: error && error.message ? String(error.message).slice(0, 200) : 'unknown',
+        }))
+      }
       if (outcome === metaWebhookIngestionStatuses.imported) counts.imported += 1
       if (outcome === metaWebhookIngestionStatuses.skipped) counts.skipped += 1
       if (outcome === metaWebhookIngestionStatuses.failed) counts.failed += 1
@@ -977,7 +1103,21 @@ async function processDueIngestions(graph) {
     )
     if (!affected) continue
     const row = await MetaWebhookIngestion.findByPk(due.id)
-    await processIngestion(row, graph)
+    try {
+      const runIngestion = module.exports.processIngestion || processIngestion
+      await runIngestion(row, graph)
+    } catch (error) {
+      if (isFatalMetaGraphError(error)) {
+        throw error
+      }
+      await markIngestionFailedSafe(row, errors.requestFailed)
+      console.error(JSON.stringify({
+        event: 'meta_ingestion_isolation_caught',
+        companyId: row ? row.companyId : '',
+        leadgenId: row ? row.leadgenId : '',
+        message: error && error.message ? String(error.message).slice(0, 200) : 'unknown',
+      }))
+    }
     processed += 1
   }
   return processed
@@ -1186,6 +1326,7 @@ module.exports = {
   enqueueInitialPageSync,
   getLatestSyncJobForPage,
   getPageLeadSyncJob,
+  isFatalMetaGraphError,
   listLeadCounts,
   listPageLeadCounts,
   presentSyncJob,

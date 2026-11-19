@@ -22,6 +22,11 @@ const {
   updateMetaDefaultAssignee,
 } = require('../../services/metaAssigneeService')
 const {
+  listPageAds,
+  listPageCampaigns,
+  listPageForms,
+} = require('../../services/metaAssetsService')
+const {
   acceptWebhookPayload,
   verifyWebhookChallenge,
   verifyWebhookSignature,
@@ -169,6 +174,21 @@ async function getLeadCounts(req, res) {
   })
 }
 
+async function getPageForms(req, res) {
+  const result = await listPageForms(req.auth, req.params.id)
+  res.status(200).json({ data: result })
+}
+
+async function getPageCampaigns(req, res) {
+  const result = await listPageCampaigns(req.auth, req.params.id)
+  res.status(200).json({ data: result })
+}
+
+async function getPageAds(req, res) {
+  const result = await listPageAds(req.auth, req.params.id)
+  res.status(200).json({ data: result })
+}
+
 async function getDefaultAssignee(req, res) {
   const result = await getMetaDefaultAssignee(req.auth)
   res.status(200).json({ data: result })
@@ -191,6 +211,9 @@ module.exports = {
   getDefaultAssignee,
   getLeadCounts,
   getOAuthCallback,
+  getPageAds,
+  getPageCampaigns,
+  getPageForms,
   getPages,
   getProfiles,
   getSyncJob,

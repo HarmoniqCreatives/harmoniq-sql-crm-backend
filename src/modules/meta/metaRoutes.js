@@ -10,6 +10,9 @@ const {
   getDefaultAssignee,
   getLeadCounts,
   getOAuthCallback,
+  getPageAds,
+  getPageCampaigns,
+  getPageForms,
   getPages,
   getProfiles,
   getSyncJob,
@@ -82,6 +85,21 @@ metaRouter.get(
   '/lead-counts',
   requirePermission(permissionKeys.metaView),
   asyncHandler(getLeadCounts),
+)
+metaRouter.get(
+  '/pages/:id/forms',
+  requirePermission(permissionKeys.metaView),
+  asyncHandler(getPageForms),
+)
+metaRouter.get(
+  '/pages/:id/campaigns',
+  requirePermission(permissionKeys.metaView),
+  asyncHandler(getPageCampaigns),
+)
+metaRouter.get(
+  '/pages/:id/ads',
+  requirePermission(permissionKeys.metaView),
+  asyncHandler(getPageAds),
 )
 metaRouter.post(
   '/pages/:id/disconnect',

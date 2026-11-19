@@ -13,7 +13,10 @@
     "db:seed:roles": "node src/scripts/seedRolesPermissions.js",
     "db:seed:catalog": "node src/scripts/seedCatalogDefaults.js",
     "db:setup": "npm run db:migrate && npm run db:seed:roles && npm run db:seed:catalog",
-    "test": "node --test --test-concurrency=1 test/*.test.js"
+    "test": "DB_NAME=\"${DB_NAME_TEST:-${DB_NAME}}\" node --test --test-concurrency=1 test/*.test.js",
+    "db:backfill:meta-created-at": "node src/scripts/backfillLeadMetaCreatedAt.js",
+    "test:leads": "DB_NAME=\"${DB_NAME_TEST:-${DB_NAME}}\" node --test --test-concurrency=1 test/leads.test.js test/leadsListEnhancements.test.js",
+    "db:seed:roles:local": "node src/scripts/seedRolesPermissions.js"
   },
   "engines": {
     "node": ">=20"

@@ -434,11 +434,18 @@ async function processIngestion(ingestion, graph) {
   }
 
   let campaignName = ''
+  let campaignStatus = ''
   let adSetName = ''
   let adName = ''
   let formName = ''
-  if (client.readObjectName) {
+  if (client.readCampaign) {
+    const campaign = await client.readCampaign(token, mapped.campaignId)
+    campaignName = campaign.name || ''
+    campaignStatus = campaign.effectiveStatus || ''
+  } else if (client.readObjectName) {
     campaignName = await client.readObjectName(token, mapped.campaignId)
+  }
+  if (client.readObjectName) {
     adSetName = await client.readObjectName(token, mapped.adSetId)
     adName = await client.readObjectName(token, mapped.adId)
     formName = await client.readObjectName(token, mapped.formId)
@@ -472,9 +479,13 @@ async function processIngestion(ingestion, graph) {
       metaLeadId: ingestion.leadgenId,
       campaignId: mapped.campaignId,
       campaignName,
+      campaignStatus,
       facebookPageId: page.pageId || '',
       facebookPageName: page.name || '',
       feedback: { type: 'general', text: metaNote },
+    }
+    if (facebookCreatedAt) {
+      createBody.metaCreatedAt = facebookCreatedAt
     }
     if (primaryAgentId) {
       createBody.primaryAgentId = primaryAgentId
@@ -496,6 +507,32 @@ async function processIngestion(ingestion, graph) {
     await ingestion.save()
   } catch (error) {
     if (error.message === errors.metaLeadDuplicate) {
+      // Refresh campaign status / fill missing Meta timestamp without creating a duplicate.
+      try {
+        const { Lead } = getModels()
+        const existing = await Lead.findOne({
+          where: { companyId: ingestion.companyId, metaLeadId: ingestion.leadgenId },
+        })
+        if (existing) {
+          let dirty = false
+          if (campaignStatus && existing.campaignStatus !== campaignStatus) {
+            existing.campaignStatus = campaignStatus
+            dirty = true
+          }
+          if (campaignName && existing.campaignName !== campaignName) {
+            existing.campaignName = campaignName
+            dirty = true
+          }
+          if (facebookCreatedAt && !existing.metaCreatedAt) {
+            existing.metaCreatedAt = facebookCreatedAt
+            dirty = true
+          }
+          if (dirty) await existing.save()
+          ingestion.leadId = existing.id
+        }
+      } catch (_updateError) {
+        // Duplicate skip must still succeed.
+      }
       ingestion.status = metaWebhookIngestionStatuses.skipped
       ingestion.lastError = ''
       await ingestion.save()

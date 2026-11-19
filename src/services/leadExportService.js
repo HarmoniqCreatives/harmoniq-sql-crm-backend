@@ -53,7 +53,9 @@ function toCsv(rows) {
     messages.csvReadiness,
     messages.csvFollowUp,
     messages.csvCampaignName,
+    messages.csvCampaignStatus,
     messages.csvPageName,
+    messages.csvMetaCreatedAt,
     messages.csvCreatedAt,
   ]
   const lines = [headers.map(csvCell).join(',')]
@@ -78,7 +80,9 @@ function toCsv(rows) {
       row.readiness,
       row.nextFollowUpAt ? new Date(row.nextFollowUpAt).toISOString() : '',
       row.campaignName || '',
-      row.facebookPageName || '',
+      row.campaignStatus || '',
+      row.facebookPageName || messages.leadPageNotAvailable || 'Not Available',
+      row.metaCreatedAt ? new Date(row.metaCreatedAt).toISOString() : '',
       row.createdAt ? new Date(row.createdAt).toISOString() : '',
     ]
     lines.push(cells.map(csvCell).join(','))
@@ -132,7 +136,9 @@ async function toXlsx(rows) {
     { header: messages.csvReadiness, key: 'readiness', width: 14 },
     { header: messages.csvFollowUp, key: 'followUp', width: 22 },
     { header: messages.csvCampaignName, key: 'campaign', width: 20 },
+    { header: messages.csvCampaignStatus, key: 'campaignStatus', width: 14 },
     { header: messages.csvPageName, key: 'page', width: 22 },
+    { header: messages.csvMetaCreatedAt, key: 'metaCreatedAt', width: 24 },
     { header: messages.csvCreatedAt, key: 'createdAt', width: 24 },
   ]
   for (const row of rows) {
@@ -156,12 +162,16 @@ async function toXlsx(rows) {
       readiness: row.readiness || '',
       followUp: row.nextFollowUpAt ? new Date(row.nextFollowUpAt).toISOString() : '',
       campaign: row.campaignName || '',
-      page: row.facebookPageName || '',
+      campaignStatus: row.campaignStatus || '',
+      page: row.facebookPageName || messages.leadPageNotAvailable || 'Not Available',
+      metaCreatedAt: toLeadCreatedExcelDate(row.metaCreatedAt),
       createdAt: toLeadCreatedExcelDate(row.createdAt),
     })
-    const createdCell = excelRow.getCell('createdAt')
-    if (createdCell.value instanceof Date) {
-      createdCell.numFmt = 'yyyy-mm-dd hh:mm:ss'
+    for (const key of ['metaCreatedAt', 'createdAt']) {
+      const cell = excelRow.getCell(key)
+      if (cell.value instanceof Date) {
+        cell.numFmt = 'yyyy-mm-dd hh:mm:ss'
+      }
     }
   }
   const buffer = await workbook.xlsx.writeBuffer()
@@ -192,32 +202,7 @@ async function buildExportQuery(auth, query) {
   const built = await buildLeadQuery(auth, query)
   const and = Array.isArray(built.where[Op.and]) ? [...built.where[Op.and]] : []
 
-  const start = readDateBoundary(query.startDate || query.from, { endOfDay: false })
-  const end = readDateBoundary(query.endDate || query.to, { endOfDay: true })
-  if ((start && !end) || (!start && end)) {
-    throw new AppError(errors.reportDateRangeInvalid, 400)
-  }
-  if (start && end && start.getTime() > end.getTime()) {
-    throw new AppError(errors.reportDateRangeInvalid, 400)
-  }
-  if (start && end) {
-    and.push({ createdAt: { [Op.between]: [start, end] } })
-  }
-
-  const pageType = readText(query, 'pageType')
-  if (pageType) {
-    if (pageType === UNKNOWN_PAGE()) {
-      and.push({
-        [Op.or]: [
-          { facebookPageName: '' },
-          { facebookPageName: null },
-        ],
-      })
-    } else {
-      built.where.facebookPageName = pageType
-    }
-  }
-
+  // Date range + pageType are applied in buildLeadQuery.
   if (and.length > 0) {
     built.where[Op.and] = and
   }

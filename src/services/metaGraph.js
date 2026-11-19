@@ -408,6 +408,27 @@ async function readObjectName(accessToken, objectId) {
   }
 }
 
+/**
+ * Reads campaign name + effective_status. Failures return empty values (non-fatal).
+ * @returns {Promise<{ name: string, effectiveStatus: string }>}
+ */
+async function readCampaign(accessToken, campaignId) {
+  if (!campaignId) return { name: '', effectiveStatus: '' }
+  const url = new URL(`https://graph.facebook.com/${readGraphVersion()}/${campaignId}`)
+  url.searchParams.set('fields', 'name,effective_status')
+  url.searchParams.set('access_token', accessToken)
+  try {
+    const response = await fetchImpl(url)
+    const payload = await readGraphPayload(response, { purpose: 'leads' })
+    return {
+      name: payload.name ? String(payload.name) : '',
+      effectiveStatus: payload.effective_status ? String(payload.effective_status) : '',
+    }
+  } catch {
+    return { name: '', effectiveStatus: '' }
+  }
+}
+
 module.exports = {
   debugAccessToken,
   exchangeAuthorizationCode,
@@ -422,6 +443,7 @@ module.exports = {
   readLead,
   readLeadgenForms,
   readObjectName,
+  readCampaign,
   readPagedEdge,
   readWhatsAppBusinessAccount,
   resetFetchImpl,

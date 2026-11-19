@@ -150,10 +150,90 @@ async function buildLeadQuery(auth, query) {
     }
   }
 
+  // Facebook Page filter (exact page name; blank/unknown uses the shared Unknown_Page_Type token).
+  const pageType = readText(query, 'pageType')
+  if (pageType) {
+    if (pageType === messages.dailyLeadEmailUnknownPageType) {
+      and.push({
+        [Op.or]: [
+          { facebookPageName: '' },
+          { facebookPageName: null },
+        ],
+      })
+    } else {
+      filter.facebookPageName = pageType
+    }
+  }
+
+  appendLeadDateRangeFilter(and, query)
+
   if (and.length > 0) {
     filter[Op.and] = and
   }
   return { where: filter, include }
+}
+
+/**
+ * Parses YYYY-MM-DD (or ISO) into a Date boundary.
+ * @param {unknown} value
+ * @param {{ endOfDay?: boolean }} options
+ * @returns {Date|null}
+ */
+function readLeadDateBoundary(value, { endOfDay = false } = {}) {
+  const text = String(value || '').trim()
+  if (!text) {
+    return null
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    return new Date(`${text}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}Z`)
+  }
+  const date = new Date(text)
+  if (Number.isNaN(date.getTime())) {
+    throw new AppError(errors.reportDateRangeInvalid, 400)
+  }
+  return date
+}
+
+/**
+ * Meta leads (non-empty metaLeadId) filter on metaCreatedAt.
+ * Manual / non-Meta leads filter on CRM createdAt.
+ * @param {object[]} and
+ * @param {object} query
+ */
+function appendLeadDateRangeFilter(and, query) {
+  const start = readLeadDateBoundary(query.startDate || query.from, { endOfDay: false })
+  const end = readLeadDateBoundary(query.endDate || query.to, { endOfDay: true })
+  if ((start && !end) || (!start && end)) {
+    throw new AppError(errors.reportDateRangeInvalid, 400)
+  }
+  if (start && end && start.getTime() > end.getTime()) {
+    throw new AppError(errors.reportDateRangeInvalid, 400)
+  }
+  if (!start || !end) {
+    return
+  }
+  and.push({
+    [Op.or]: [
+      {
+        [Op.and]: [
+          { metaLeadId: { [Op.ne]: null } },
+          { metaLeadId: { [Op.ne]: '' } },
+          { metaCreatedAt: { [Op.between]: [start, end] } },
+        ],
+      },
+      {
+        [Op.and]: [
+          {
+            [Op.or]: [
+              { metaLeadId: null },
+              { metaLeadId: '' },
+            ],
+          },
+          { createdAt: { [Op.between]: [start, end] } },
+        ],
+      },
+    ],
+  })
 }
 
 function readPageNumber(value, fallback, max) {
@@ -243,8 +323,18 @@ async function createLead(auth, body) {
   const metaLeadId = readText(body, 'metaLeadId') || null
   const campaignId = readText(body, 'campaignId')
   const campaignName = readText(body, 'campaignName')
+  const campaignStatus = readText(body, 'campaignStatus')
   const facebookPageId = readText(body, 'facebookPageId')
   const facebookPageName = readText(body, 'facebookPageName')
+  let metaCreatedAt = null
+  if (body && body.metaCreatedAt) {
+    const parsed = body.metaCreatedAt instanceof Date
+      ? body.metaCreatedAt
+      : new Date(body.metaCreatedAt)
+    if (!Number.isNaN(parsed.getTime())) {
+      metaCreatedAt = parsed
+    }
+  }
 
   try {
     const lead = await createLeadWithRetry({
@@ -259,8 +349,10 @@ async function createLead(auth, body) {
       agents,
       placement,
       metaLeadId,
+      metaCreatedAt,
       campaignId,
       campaignName,
+      campaignStatus,
       facebookPageId,
       facebookPageName,
       company,
@@ -340,8 +432,10 @@ async function createLeadWithRetry(context, attempt = 0) {
     agents,
     placement,
     metaLeadId,
+    metaCreatedAt,
     campaignId,
     campaignName,
+    campaignStatus,
     facebookPageId,
     facebookPageName,
     company,
@@ -360,8 +454,10 @@ async function createLeadWithRetry(context, attempt = 0) {
         email: scalars.email,
         source: scalars.source,
         metaLeadId,
+        metaCreatedAt: metaCreatedAt || null,
         campaignId: campaignId || '',
         campaignName: campaignName || '',
+        campaignStatus: campaignStatus || '',
         facebookPageId: facebookPageId || '',
         facebookPageName: facebookPageName || '',
         statusId: status.id,
@@ -696,6 +792,98 @@ async function presentLeads(auth, leads) {
   return leads.map((lead) => presentLead(lead, itemMap, userMap, timeZone))
 }
 
+
+const BULK_LEAD_LIMIT = 100
+
+/**
+ * @param {unknown} body
+ * @returns {string[]}
+ */
+function readBulkLeadIds(body) {
+  const raw = body && body.ids
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new AppError(errors.bulkIdsRequired, 400)
+  }
+  if (raw.length > BULK_LEAD_LIMIT) {
+    throw new AppError(errors.bulkIdsLimit, 400)
+  }
+  const ids = []
+  const seen = new Set()
+  for (const value of raw) {
+    const id = String(value || '').trim()
+    if (!id || !isUuid(id) || seen.has(id)) continue
+    seen.add(id)
+    ids.push(id)
+  }
+  if (!ids.length) {
+    throw new AppError(errors.bulkIdsRequired, 400)
+  }
+  return ids
+}
+
+/**
+ * Runs per-lead work with scope isolation; returns success/failure lists.
+ * @param {object} auth
+ * @param {string[]} ids
+ * @param {(leadId: string) => Promise<void>} worker
+ */
+async function runBulkLeadAction(auth, ids, worker) {
+  const succeeded = []
+  const failed = []
+  for (const leadId of ids) {
+    try {
+      await worker(leadId)
+      succeeded.push(leadId)
+    } catch (error) {
+      failed.push({
+        id: leadId,
+        message: error && error.message ? error.message : errors.requestFailed,
+        status: error && error.status ? error.status : 500,
+      })
+    }
+  }
+  return { succeeded, failed, succeededCount: succeeded.length, failedCount: failed.length }
+}
+
+/**
+ * Bulk assign / first-assign (same rules as assignLead).
+ */
+async function bulkAssignLeads(auth, body) {
+  const ids = readBulkLeadIds(body)
+  const result = await runBulkLeadAction(auth, ids, async (leadId) => {
+    await assignLead(auth, leadId, {
+      primaryAgentId: body.primaryAgentId,
+      reason: body.reason,
+    })
+  })
+  return { message: messages.leadsBulkAssignDone, ...result }
+}
+
+/**
+ * Bulk transfer (same assignLead path; optional reason preserved).
+ */
+async function bulkTransferLeads(auth, body) {
+  const ids = readBulkLeadIds(body)
+  const result = await runBulkLeadAction(auth, ids, async (leadId) => {
+    await assignLead(auth, leadId, {
+      primaryAgentId: body.primaryAgentId,
+      reason: body.reason,
+    })
+  })
+  return { message: messages.leadsBulkTransferDone, ...result }
+}
+
+/**
+ * Bulk soft-delete.
+ */
+async function bulkDeleteLeads(auth, body) {
+  const ids = readBulkLeadIds(body)
+  const result = await runBulkLeadAction(auth, ids, async (leadId) => {
+    await deleteLead(auth, leadId)
+  })
+  return { message: messages.leadsBulkDeleteDone, ...result }
+}
+
 module.exports = {
   listLeads,
   getLead,
@@ -703,10 +891,15 @@ module.exports = {
   updateLead,
   assignLead,
   deleteLead,
+  bulkAssignLeads,
+  bulkTransferLeads,
+  bulkDeleteLeads,
   leadScopeFilter,
   buildLeadQuery,
   presentLeads,
   presentLead,
   isOverdue,
   calendarDate,
+  readLeadDateBoundary,
+  appendLeadDateRangeFilter,
 }

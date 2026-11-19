@@ -1,5 +1,8 @@
 const {
   assignLead,
+  bulkAssignLeads,
+  bulkDeleteLeads,
+  bulkTransferLeads,
   createLead,
   deleteLead,
   getLead,
@@ -55,6 +58,24 @@ async function patchLeadAssignment(req, res) {
   res.status(200).json({ data: result })
 }
 
+/** POST /api/leads/bulk/assign */
+async function postLeadsBulkAssign(req, res) {
+  const result = await bulkAssignLeads(req.auth, req.body)
+  res.status(200).json({ data: result })
+}
+
+/** POST /api/leads/bulk/transfer */
+async function postLeadsBulkTransfer(req, res) {
+  const result = await bulkTransferLeads(req.auth, req.body)
+  res.status(200).json({ data: result })
+}
+
+/** POST /api/leads/bulk/delete */
+async function postLeadsBulkDelete(req, res) {
+  const result = await bulkDeleteLeads(req.auth, req.body)
+  res.status(200).json({ data: result })
+}
+
 /** DELETE /api/leads/:id */
 async function removeLead(req, res) {
   const result = await deleteLead(req.auth, req.params.id)
@@ -69,5 +90,8 @@ module.exports = {
   postLead,
   patchLead,
   patchLeadAssignment,
+  postLeadsBulkAssign,
+  postLeadsBulkTransfer,
+  postLeadsBulkDelete,
   removeLead,
 }

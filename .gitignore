@@ -6,3 +6,9 @@ node_modules/
 logs/
 coverage/
 .DS_Store
+
+# Private migration exports (unredacted; write outside repo only)
+**/production-11-user-export.json
+**/production-*-user-export.json
+.harmoniq-migration/
+**/harmoniq-migration/

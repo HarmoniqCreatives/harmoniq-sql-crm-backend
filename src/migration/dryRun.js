@@ -4,9 +4,10 @@ const { validateExportPayload, transformExportToSqlRecords } = require('./lib/va
 const { createIdMap } = require('./lib/idMap')
 const { formatValidationReport } = require('./lib/report')
 const { redactSecrets } = require('./lib/sanitize')
+const { reconcileAgainstDestination } = require('./lib/reconcile')
 
 /**
- * Full dry-run: validate + transform preview (no DB writes).
+ * Full dry-run: validate + transform preview + optional destination reconcile (no DB writes).
  */
 function runDryRun(exportPayload, options = {}) {
   const validation = validateExportPayload(exportPayload)
@@ -14,16 +15,24 @@ function runDryRun(exportPayload, options = {}) {
 
   let transformPreview = null
   let transformError = null
+  let records = null
+  let reconciliation = null
+
   if (validation.ok || options.transformEvenIfInvalid) {
     try {
-      const records = transformExportToSqlRecords(exportPayload, idMap, {
+      records = transformExportToSqlRecords(exportPayload, idMap, {
         companyForceStatuses: options.companyForceStatuses || {},
       })
+      reconciliation = reconcileAgainstDestination(records, options.destinationSnapshot || null)
       transformPreview = {
         companies: records.companies.length,
+        branches: records.branches.length,
+        teams: records.teams.length,
         roles: records.roles.length,
         users: records.users.length,
         sampleCompany: redactSecrets(records.companies[0] || null),
+        sampleBranch: redactSecrets(records.branches[0] || null),
+        sampleTeam: redactSecrets(records.teams[0] || null),
         sampleRole: redactSecrets(records.roles[0] || null),
         sampleUser: records.users[0]
           ? redactSecrets({ ...records.users[0], passwordHash: '[REDACTED]' })
@@ -31,6 +40,7 @@ function runDryRun(exportPayload, options = {}) {
         superAdminPermissionsCount: (
           records.roles.find((r) => r.isProtected || r.key === 'super_admin') || { permissions: [] }
         ).permissions.length,
+        reconciliation,
       }
     } catch (error) {
       transformError = error.message
@@ -38,14 +48,16 @@ function runDryRun(exportPayload, options = {}) {
   }
 
   const reportMarkdown = formatValidationReport(validation, {
-    title: options.title || 'User Migration Dry-Run Report',
+    title: options.title || 'Company / Role / User Migration Dry-Run Report',
     generatedAt: new Date().toISOString(),
+    reconciliation,
   })
 
   return {
     validation,
     transformPreview,
     transformError,
+    reconciliation,
     idMapEntries: idMap.toJSON(),
     reportMarkdown,
   }

@@ -1,11 +1,20 @@
 'use strict'
 
-const { v4: uuidv4 } = require('uuid')
+const { v5: uuidv5 } = require('uuid')
 
 /**
- * Stable Mongo ObjectId → SQL UUID mapping for company / role / user.
- * In-memory by default; can hydrate from / serialize to plain JSON.
+ * Stable Mongo ObjectId → SQL UUID mapping for company / branch / team / role / user.
+ * Uses UUID v5 so the same Mongo id always maps to the same SQL UUID (idempotent re-import).
+ * In-memory by default; can hydrate from / serialize to plain JSON (overrides win).
  */
+
+/** Project-fixed namespace — do not change once production imports exist. */
+const MIGRATION_ID_NAMESPACE = 'a8e4c2f1-7b3d-4e9a-9c1f-2d6b8e0a5f47'
+
+function deterministicSqlUuid(entityType, mongoId) {
+  return uuidv5(`${entityType}:${String(mongoId)}`, MIGRATION_ID_NAMESPACE)
+}
+
 function createIdMap(initialEntries = []) {
   /** @type {Map<string, { sqlUuid: string, companyMongoId: string|null, importedAt: string }>} */
   const store = new Map()
@@ -33,7 +42,7 @@ function createIdMap(initialEntries = []) {
   }
 
   /**
-   * Returns existing UUID or allocates a new one (idempotent).
+   * Returns existing UUID or allocates a deterministic one (idempotent across process restarts).
    */
   function ensure(entityType, mongoId, companyMongoId = null) {
     const key = mapKey(entityType, mongoId)
@@ -41,7 +50,7 @@ function createIdMap(initialEntries = []) {
     if (existing) {
       return existing.sqlUuid
     }
-    const sqlUuid = uuidv4()
+    const sqlUuid = deterministicSqlUuid(entityType, mongoId)
     store.set(key, {
       sqlUuid,
       companyMongoId: companyMongoId == null ? null : String(companyMongoId),
@@ -95,4 +104,8 @@ function createIdMap(initialEntries = []) {
   }
 }
 
-module.exports = { createIdMap }
+module.exports = {
+  createIdMap,
+  deterministicSqlUuid,
+  MIGRATION_ID_NAMESPACE,
+}

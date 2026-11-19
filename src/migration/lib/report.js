@@ -15,6 +15,8 @@ function formatValidationReport(result, options = {}) {
   lines.push('')
   lines.push('## Counts')
   lines.push(`- Companies: ${result.counts.companies}`)
+  lines.push(`- Branches: ${result.counts.branches || 0}`)
+  lines.push(`- Teams: ${result.counts.teams || 0}`)
   lines.push(`- Roles: ${result.counts.roles}`)
   lines.push(`- Users: ${result.counts.users}`)
   lines.push('')
@@ -55,6 +57,38 @@ function formatValidationReport(result, options = {}) {
   lines.push(JSON.stringify(redactSecrets(result.errors), null, 2))
   lines.push('```')
   lines.push('')
+
+  if (options.reconciliation) {
+    const r = options.reconciliation
+    lines.push('## Destination reconciliation')
+    lines.push('')
+    const singular = {
+      companies: 'company',
+      branches: 'branch',
+      teams: 'team',
+      roles: 'role',
+      users: 'user',
+    }
+    lines.push('| Entity | Source | Destination | Ready | Existing (skip) | Conflicts |')
+    lines.push('| --- | ---: | ---: | ---: | ---: | ---: |')
+    for (const entity of ['companies', 'branches', 'teams', 'roles', 'users']) {
+      const conflictCount = (r.conflicts || []).filter((c) => c.entity === singular[entity]).length
+      lines.push(
+        `| ${entity} | ${r.sourceCounts?.[entity] ?? 0} | ${r.destinationCounts?.[entity] ?? 0} | ${r.readyToImport?.[entity] ?? 0} | ${r.existingMatches?.[entity] ?? 0} | ${conflictCount} |`,
+      )
+    }
+    lines.push('')
+    if ((r.conflicts || []).length === 0) {
+      lines.push('Missing / conflict details: none')
+    } else {
+      lines.push('Conflicts / duplicate keys:')
+      for (const c of r.conflicts) {
+        lines.push(`- [${c.reason}] ${c.entity} ${c.id}${c.email ? ` (${c.email})` : ''}`)
+      }
+    }
+    lines.push('')
+  }
+
   return lines.join('\n')
 }
 

@@ -65,6 +65,9 @@ const permissionKeys = {
   settingsManage: 'settings.manage',
   // Kept for forward-compatible catalog seeds / future modules (not enforced by this module).
   leadsBulk: 'leads.bulk',
+  leadsBulkAssign: 'leads.bulk_assign',
+  leadsBulkTransfer: 'leads.bulk_transfer',
+  leadsBulkDelete: 'leads.bulk_delete',
   activitiesManage: 'activities.manage',
   templatesManage: 'templates.manage',
   communicationsSend: 'communications.send',

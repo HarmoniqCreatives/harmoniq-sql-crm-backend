@@ -1,7 +1,7 @@
 {
   "meta": {
     "exportedAt": "2026-11-17T00:00:00.000Z",
-    "scope": ["companies", "roles", "users"],
+    "scope": ["companies", "branches", "teams", "roles", "users"],
     "source": "synthetic-fixture"
   },
   "companyActiveHints": {
@@ -32,6 +32,31 @@
       "enabledCurrencies": ["INR"],
       "createdAt": "2024-06-01T00:00:00.000Z",
       "updatedAt": "2024-06-01T00:00:00.000Z"
+    }
+  ],
+  "branches": [
+    {
+      "_id": "branch111111111111111111",
+      "companyId": "aaaaaaaaaaaaaaaaaaaaaaaa",
+      "name": "Dubai Marina",
+      "nameKey": "dubai marina",
+      "timezone": "Asia/Dubai",
+      "isActive": true,
+      "createdAt": "2024-01-02T00:00:00.000Z",
+      "updatedAt": "2024-01-02T00:00:00.000Z"
+    }
+  ],
+  "teams": [
+    {
+      "_id": "team11111111111111111111",
+      "companyId": "aaaaaaaaaaaaaaaaaaaaaaaa",
+      "branchId": "branch111111111111111111",
+      "name": "Sales A",
+      "nameKey": "sales a",
+      "managerUserId": "user22222222222222222222",
+      "isActive": true,
+      "createdAt": "2024-01-03T00:00:00.000Z",
+      "updatedAt": "2024-01-03T00:00:00.000Z"
     }
   ],
   "roles": [
@@ -132,6 +157,8 @@
       "_id": "user33333333333333333333",
       "companyId": "aaaaaaaaaaaaaaaaaaaaaaaa",
       "roleId": "role33333333333333333333",
+      "branchId": "branch111111111111111111",
+      "teamId": "team11111111111111111111",
       "name": "Agent Three",
       "email": "agent@falcon.example",
       "passwordHash": "$2b$04$ZCj5Jdky6w/9VBEFaQ93JOD.R2mBKA3oeytrN69.Z0Q68wkBYx.Ru",

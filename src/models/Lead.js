@@ -17,8 +17,12 @@ function defineLead(sequelize) {
     email: { type: DataTypes.STRING(255), allowNull: false, defaultValue: '' },
     source: { type: DataTypes.ENUM(...Object.values(leadSources)), allowNull: false, defaultValue: leadSources.manual },
     metaLeadId: { type: DataTypes.STRING(128), allowNull: true },
+    /** Original Meta/Facebook lead generation time (`created_time`). Null for manual leads. */
+    metaCreatedAt: { type: DataTypes.DATE, allowNull: true },
     campaignId: { type: DataTypes.STRING(128), allowNull: false, defaultValue: '' },
     campaignName: { type: DataTypes.STRING(255), allowNull: false, defaultValue: '' },
+    /** Graph campaign `effective_status` (e.g. ACTIVE, PAUSED). Empty when unknown. */
+    campaignStatus: { type: DataTypes.STRING(32), allowNull: false, defaultValue: '' },
     facebookPageId: { type: DataTypes.STRING(128), allowNull: false, defaultValue: '' },
     facebookPageName: { type: DataTypes.STRING(255), allowNull: false, defaultValue: '' },
     statusId: { type: DataTypes.CHAR(36), allowNull: false },

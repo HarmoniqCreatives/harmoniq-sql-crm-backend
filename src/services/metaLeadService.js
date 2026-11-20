@@ -28,6 +28,14 @@ const { decryptSecret } = require('../utils/metaSecrets')
 const graphClient = require('./metaGraph')
 const { createLead } = require('./leadService')
 const { resolveMetaDefaultPrimaryAgentId } = require('./metaAssigneeService')
+const {
+  applyMetaMetadataToLead,
+  createEnrichmentCache,
+  enrichMetaAdvertisingMetadata,
+  leadNeedsMetaRepair,
+  logEnrichmentEvent,
+  metaEnrichmentStatuses,
+} = require('./metaEnrichmentService')
 
 const INSTANCE_ID = `${os.hostname()}:${process.pid}:${crypto.randomBytes(4).toString('hex')}`
 
@@ -508,75 +516,49 @@ async function processIngestion(ingestion, graph) {
     return ingestion
   }
 
-  let campaignName = ''
-  let campaignStatus = ''
-  let adSetName = ''
-  let adName = ''
-  let formName = ''
-  if (mapped.campaignId && client.readCampaign) {
-    let campaign = await client.readCampaign(token, mapped.campaignId)
-    campaignName = campaign.name || ''
-    campaignStatus = campaign.effectiveStatus || ''
-    // Page tokens often cannot read Marketing API campaign objects — retry with user token.
-    if ((!campaignName || !campaignStatus) && page.connectionId) {
-      try {
-        const { MetaConnection } = getModels()
-        const connection = await MetaConnection.findOne({
-          where: {
-            id: page.connectionId,
-            companyId: ingestion.companyId,
-            status: metaConnectionStatuses.connected,
-          },
-        })
-        if (connection && connection.tokenCipher) {
-          const userToken = decryptSecret(connection.tokenCipher)
-          const retry = await client.readCampaign(userToken, mapped.campaignId)
-          if (retry.name) campaignName = retry.name
-          if (retry.effectiveStatus) campaignStatus = retry.effectiveStatus
-          if (!campaignName && !campaignStatus) {
-            console.error(JSON.stringify({
-              event: 'meta_campaign_enrichment_failed',
-              companyId: ingestion.companyId,
-              leadgenId: ingestion.leadgenId,
-              campaignId: mapped.campaignId,
-              tokenKind: 'user',
-              errorCode: retry.errorCode || campaign.errorCode || 'EMPTY_CAMPAIGN',
-            }))
-          }
-        } else if (campaign.errorCode) {
-          console.error(JSON.stringify({
-            event: 'meta_campaign_enrichment_failed',
-            companyId: ingestion.companyId,
-            leadgenId: ingestion.leadgenId,
-            campaignId: mapped.campaignId,
-            tokenKind: 'page',
-            errorCode: campaign.errorCode,
-          }))
-        }
-      } catch (enrichError) {
-        let errorCode = 'ENRICHMENT_ERROR'
-        if (enrichError && enrichError.code) errorCode = String(enrichError.code)
-        else if (enrichError && enrichError.message) {
-          errorCode = String(enrichError.message).slice(0, 80)
-        }
-        console.error(JSON.stringify({
-          event: 'meta_campaign_enrichment_failed',
-          companyId: ingestion.companyId,
-          leadgenId: ingestion.leadgenId,
-          campaignId: mapped.campaignId,
-          tokenKind: 'user',
-          errorCode,
-        }))
-      }
-    }
-  } else if (mapped.campaignId && client.readObjectName) {
-    campaignName = await client.readObjectName(token, mapped.campaignId)
+  const enrichmentCache = createEnrichmentCache()
+  let enrichment = {
+    campaignName: '',
+    campaignStatus: '',
+    adName: '',
+    adSetName: '',
+    formName: '',
+    metaEnrichmentStatus: metaEnrichmentStatuses.pending,
+    metaEnrichmentError: '',
   }
-  if (client.readObjectName) {
-    adSetName = await client.readObjectName(token, mapped.adSetId)
-    adName = await client.readObjectName(token, mapped.adId)
-    formName = await client.readObjectName(token, mapped.formId)
+  try {
+    enrichment = await enrichMetaAdvertisingMetadata({
+      page,
+      companyId: ingestion.companyId,
+      pageToken: token,
+      graph: client,
+      cache: enrichmentCache,
+      leadgenId: ingestion.leadgenId,
+      ids: {
+        campaignId: mapped.campaignId,
+        adId: mapped.adId,
+        adSetId: mapped.adSetId,
+        formId: mapped.formId,
+      },
+    })
+  } catch (enrichError) {
+    enrichment.metaEnrichmentStatus = metaEnrichmentStatuses.failed
+    enrichment.metaEnrichmentError = 'unknown'
+    logEnrichmentEvent('meta_enrichment_unexpected', {
+      companyId: ingestion.companyId,
+      pageId: page.pageId,
+      leadgenId: ingestion.leadgenId,
+      errorCategory: 'unknown',
+      message: enrichError && enrichError.message
+        ? String(enrichError.message).slice(0, 180)
+        : 'enrichment_error',
+    })
   }
+  const campaignName = enrichment.campaignName || ''
+  const campaignStatus = enrichment.campaignStatus || ''
+  const adSetName = enrichment.adSetName || ''
+  const adName = enrichment.adName || ''
+  const formName = enrichment.formName || ''
   let facebookCreatedAt = null
   if (graphLead.created_time) {
     const created = new Date(graphLead.created_time)
@@ -607,8 +589,16 @@ async function processIngestion(ingestion, graph) {
       campaignId: mapped.campaignId,
       campaignName,
       campaignStatus,
+      adId: mapped.adId,
+      adName,
+      adSetId: mapped.adSetId,
+      adSetName,
+      formId: mapped.formId,
+      formName,
       facebookPageId: page.pageId || '',
       facebookPageName: page.name || '',
+      metaEnrichmentStatus: enrichment.metaEnrichmentStatus || metaEnrichmentStatuses.completed,
+      metaEnrichmentError: enrichment.metaEnrichmentError || '',
       feedback: { type: 'general', text: metaNote },
     }
     if (facebookCreatedAt) {
@@ -634,28 +624,37 @@ async function processIngestion(ingestion, graph) {
     await ingestion.save()
   } catch (error) {
     if (error.message === errors.metaLeadDuplicate) {
-      // Refresh campaign status / fill missing Meta timestamp without creating a duplicate.
+      // Fill-empty metadata repair only — never create a second lead or change assignment.
       try {
         const { Lead } = getModels()
         const existing = await Lead.findOne({
           where: { companyId: ingestion.companyId, metaLeadId: ingestion.leadgenId },
         })
         if (existing) {
-          let dirty = false
-          if (campaignStatus && existing.campaignStatus !== campaignStatus) {
-            existing.campaignStatus = campaignStatus
-            dirty = true
-          }
-          if (campaignName && existing.campaignName !== campaignName) {
-            existing.campaignName = campaignName
-            dirty = true
-          }
-          if (facebookCreatedAt && !existing.metaCreatedAt) {
-            existing.metaCreatedAt = facebookCreatedAt
-            dirty = true
-          }
-          if (dirty) await existing.save()
+          await applyMetaMetadataToLead(existing, {
+            campaignId: mapped.campaignId,
+            campaignName,
+            campaignStatus,
+            adId: mapped.adId,
+            adName,
+            adSetId: mapped.adSetId,
+            adSetName,
+            formId: mapped.formId,
+            formName,
+            facebookPageId: page.pageId || '',
+            facebookPageName: page.name || '',
+            metaCreatedAt: facebookCreatedAt,
+            metaEnrichmentStatus: enrichment.metaEnrichmentStatus,
+            metaEnrichmentError: enrichment.metaEnrichmentError,
+          })
           ingestion.leadId = existing.id
+          logEnrichmentEvent('meta_lead_duplicate_metadata_repair', {
+            companyId: ingestion.companyId,
+            pageId: page.pageId,
+            leadgenId: ingestion.leadgenId,
+            leadId: existing.id,
+            message: 'fill_empty_only',
+          })
         }
       } catch (_updateError) {
         // Duplicate skip must still succeed.
@@ -723,12 +722,13 @@ async function processIngestion(ingestion, graph) {
 /**
  * Queues one Graph lead for import; reuses existing ingestion rows when present.
  */
-async function queueGraphLead(page, graphLead, graph, companyId) {
+async function queueGraphLead(page, graphLead, graph, companyId, options = {}) {
   const { MetaWebhookIngestion } = getModels()
   const leadgenId = graphLead.id ? String(graphLead.id) : ''
   if (!leadgenId) return metaWebhookIngestionStatuses.failed
   const formId = graphLead.form_id ? String(graphLead.form_id) : ''
   const dedupeKey = makeDedupeKey(companyId, page.pageId, leadgenId)
+  const enrichmentCache = options.enrichmentCache || null
   let existing = await MetaWebhookIngestion.findOne({ where: { dedupeKey } })
   if (!existing) {
     try {
@@ -757,7 +757,32 @@ async function queueGraphLead(page, graphLead, graph, companyId) {
     existing.status === metaWebhookIngestionStatuses.imported
     || existing.status === metaWebhookIngestionStatuses.skipped
   ) {
-    // Already handled (webhook or prior sync) — count as skipped for this run.
+    // Phase 1: eligible fill-empty metadata repair only — never create a Lead here.
+    try {
+      const repaired = await repairImportedIngestionMetadata({
+        ingestion: existing,
+        page,
+        graph,
+        companyId,
+        graphLead,
+        enrichmentCache,
+      })
+      if (repaired) {
+        return metaWebhookIngestionStatuses.skipped
+      }
+    } catch (repairError) {
+      if (isFatalMetaGraphError(repairError)) {
+        throw repairError
+      }
+      console.error(JSON.stringify({
+        event: 'meta_lead_metadata_repair_isolated',
+        companyId: companyId || '',
+        leadgenId: leadgenId || '',
+        message: repairError && repairError.message
+          ? String(repairError.message).slice(0, 200)
+          : 'repair_error',
+      }))
+    }
     return metaWebhookIngestionStatuses.skipped
   }
   existing.status = metaWebhookIngestionStatuses.processing
@@ -779,6 +804,123 @@ async function queueGraphLead(page, graphLead, graph, companyId) {
     }))
     return metaWebhookIngestionStatuses.failed
   }
+}
+
+/**
+ * Fill-empty advertising metadata for an already-imported Meta lead during later syncs.
+ * Requires an existing Lead matched by { companyId, metaLeadId }. Never creates a Lead.
+ *
+ * @returns {Promise<boolean>} true when at least one field was filled
+ */
+async function repairImportedIngestionMetadata({
+  ingestion,
+  page,
+  graph,
+  companyId,
+  graphLead,
+  enrichmentCache,
+}) {
+  const { Lead } = getModels()
+  const lead = await Lead.findOne({
+    where: {
+      companyId,
+      metaLeadId: ingestion.leadgenId,
+    },
+  })
+  if (!lead) {
+    logEnrichmentEvent('meta_lead_metadata_repair_skipped', {
+      companyId,
+      pageId: page.pageId,
+      leadgenId: ingestion.leadgenId,
+      message: 'no_matching_lead',
+    })
+    return false
+  }
+  if (!leadNeedsMetaRepair(lead)) {
+    return false
+  }
+
+  const client = graph || graphClient
+  let token = ''
+  try {
+    token = decryptSecret(page.tokenCipher)
+  } catch {
+    logEnrichmentEvent('meta_lead_metadata_repair_skipped', {
+      companyId,
+      pageId: page.pageId,
+      leadgenId: ingestion.leadgenId,
+      leadId: lead.id,
+      errorCategory: 'token',
+      message: 'page_token_unavailable',
+    })
+    return false
+  }
+
+  let source = graphLead || null
+  if (!source && client.readLead) {
+    try {
+      source = await client.readLead(token, ingestion.leadgenId)
+    } catch (error) {
+      if (isFatalMetaGraphError(error)) throw error
+      source = null
+    }
+  }
+  const mapped = source ? mapLeadFields(source) : {
+    campaignId: lead.campaignId || ingestion.campaignId || '',
+    adId: lead.adId || ingestion.adId || '',
+    adSetId: lead.adSetId || ingestion.adSetId || '',
+    formId: lead.formId || ingestion.formId || '',
+  }
+
+  const enrichment = await enrichMetaAdvertisingMetadata({
+    page,
+    companyId,
+    pageToken: token,
+    graph: client,
+    cache: enrichmentCache || createEnrichmentCache(),
+    leadgenId: ingestion.leadgenId,
+    leadId: lead.id,
+    ids: {
+      campaignId: mapped.campaignId || lead.campaignId || '',
+      adId: mapped.adId || lead.adId || '',
+      adSetId: mapped.adSetId || lead.adSetId || '',
+      formId: mapped.formId || lead.formId || '',
+    },
+  })
+
+  let facebookCreatedAt = null
+  if (source && source.created_time) {
+    const created = new Date(source.created_time)
+    if (!Number.isNaN(created.getTime())) facebookCreatedAt = created
+  }
+
+  const result = await applyMetaMetadataToLead(lead, {
+    campaignId: mapped.campaignId,
+    campaignName: enrichment.campaignName,
+    campaignStatus: enrichment.campaignStatus,
+    adId: mapped.adId,
+    adName: enrichment.adName,
+    adSetId: mapped.adSetId,
+    adSetName: enrichment.adSetName,
+    formId: mapped.formId,
+    formName: enrichment.formName,
+    facebookPageId: page.pageId || '',
+    facebookPageName: page.name || '',
+    metaCreatedAt: facebookCreatedAt,
+    metaEnrichmentStatus: enrichment.metaEnrichmentStatus,
+    metaEnrichmentError: enrichment.metaEnrichmentError,
+  })
+
+  if (result.changed) {
+    logEnrichmentEvent('meta_lead_metadata_repaired', {
+      companyId,
+      pageId: page.pageId,
+      leadgenId: ingestion.leadgenId,
+      leadId: lead.id,
+      message: result.fields.join(','),
+    })
+  }
+  return result.changed
 }
 
 async function syncPageLeads(auth, pageId, body, graph, progress) {
@@ -809,6 +951,7 @@ async function syncPageLeads(auth, pageId, body, graph, progress) {
   let formsDone = 0
   let leadsSeen = 0
   let formFetchFailures = 0
+  const enrichmentCache = createEnrichmentCache()
 
   if (progress) {
     await progress({
@@ -850,7 +993,9 @@ async function syncPageLeads(auth, pageId, body, graph, progress) {
       leadsSeen += 1
       let outcome = metaWebhookIngestionStatuses.failed
       try {
-        outcome = await queueGraphLead(page, graphLead, client, auth.companyId)
+        outcome = await queueGraphLead(page, graphLead, client, auth.companyId, {
+          enrichmentCache,
+        })
       } catch (error) {
         // Token / permission / rate-limit must fail the job — do not swallow.
         if (isFatalMetaGraphError(error)) {

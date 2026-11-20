@@ -71,6 +71,7 @@ const messages = {
   metaLeadNoteSource: 'Lead source',
   metaLeadNoteSourceFacebook: 'Facebook',
   metaDefaultAssigneeUpdated: 'Meta default lead assignee saved.',
+  metaAutoSyncConfigNote: 'Auto Sync only schedules periodic page pulls. Webhooks and Manual Sync Now stay available when Auto Sync is off.',
   dailyLeadEmailUnknownPageType: 'Unknown_Page_Type',
   leadPageNotAvailable: 'Not Available',
   emailReportLeadName: 'Lead Report',

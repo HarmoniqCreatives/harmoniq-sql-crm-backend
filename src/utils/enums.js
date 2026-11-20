@@ -189,6 +189,15 @@ const metaSyncJobStatuses = {
   failed: 'failed',
 }
 
+/** Lead.metaEnrichmentStatus — import success is separate from advertising metadata fill. */
+const metaEnrichmentStatuses = {
+  pending: 'pending',
+  completed: 'completed',
+  partial: 'partial',
+  failed: 'failed',
+  notApplicable: 'not_applicable',
+}
+
 const emailReportTypes = {
   leadReport: 'lead_report',
 }
@@ -314,6 +323,7 @@ module.exports = {
   metaFormSubscriptionStatuses,
   metaWebhookIngestionStatuses,
   metaSyncJobStatuses,
+  metaEnrichmentStatuses,
   emailReportTypes,
   emailReportFrequencies,
   emailReportMonthlySchedules,

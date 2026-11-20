@@ -74,7 +74,7 @@ function mockGraphSequential(handlers) {
   })
 }
 
-async function seedConnectedPage(admin, pageId = 'page-sync-1') {
+async function seedConnectedPage(admin, pageId = `page-sync-${Date.now()}-${Math.floor(Math.random() * 10000)}`) {
   const { MetaAppProfile, MetaConnection, MetaPage } = getModels()
   const profile = await MetaAppProfile.create({
     id: crypto.randomUUID(),
@@ -154,7 +154,7 @@ beforeEach(() => {
 test('manual sync requires auth and meta.pages.manage; cross-tenant page returns 404', async () => {
   const a = await registerVerifiedAdmin('SyncPermA')
   const b = await registerVerifiedAdmin('SyncPermB')
-  const { page } = await seedConnectedPage(a, 'page-perm')
+  const { page } = await seedConnectedPage(a, `page-perm-${Date.now()}`)
 
   const unauth = await request(app).post(`/api/meta/pages/${page.id}/sync`)
   assert.equal(unauth.status, 401)
@@ -177,7 +177,7 @@ test('manual sync requires auth and meta.pages.manage; cross-tenant page returns
 
 test('manual sync imports leads across forms with pagination and skips duplicates', async () => {
   const admin = await registerVerifiedAdmin('SyncImport')
-  const { page } = await seedConnectedPage(admin, 'page-import')
+  const { page } = await seedConnectedPage(admin, `page-import-${Date.now()}`)
 
   mockGraphSequential([
     // forms page 1
@@ -246,7 +246,7 @@ test('manual sync imports leads across forms with pagination and skips duplicate
 
 test('expired token marks page expired and fails the job', async () => {
   const admin = await registerVerifiedAdmin('SyncExpired')
-  const { page } = await seedConnectedPage(admin, 'page-expired')
+  const { page } = await seedConnectedPage(admin, `page-expired-${Date.now()}`)
 
   mockGraphSequential([
     () => jsonResponse({ error: { message: 'Session invalid', code: 190 } }, 400),
@@ -268,7 +268,7 @@ test('expired token marks page expired and fails the job', async () => {
 
 test('rate limit fails sync job without false success', async () => {
   const admin = await registerVerifiedAdmin('SyncRate')
-  const { page } = await seedConnectedPage(admin, 'page-rate')
+  const { page } = await seedConnectedPage(admin, `page-rate-${Date.now()}`)
 
   mockGraphSequential([
     () => jsonResponse({ error: { message: 'rate', code: 17 } }, 400),
@@ -288,7 +288,7 @@ test('rate limit fails sync job without false success', async () => {
 
 test('DB claim prevents double-processing the same pending job', async () => {
   const admin = await registerVerifiedAdmin('SyncLock')
-  const { page } = await seedConnectedPage(admin, 'page-lock')
+  const { page } = await seedConnectedPage(admin, `page-lock-${Date.now()}`)
 
   mockGraphSequential([
     () => jsonResponse({ data: [{ id: 'form-lock', name: 'F' }] }),
@@ -308,7 +308,7 @@ test('DB claim prevents double-processing the same pending job', async () => {
 
 test('incomplete Meta lead is counted failed without creating a CRM lead', async () => {
   const admin = await registerVerifiedAdmin('SyncIncomplete')
-  const { page } = await seedConnectedPage(admin, 'page-incomplete')
+  const { page } = await seedConnectedPage(admin, `page-incomplete-${Date.now()}`)
 
   mockGraphSequential([
     () => jsonResponse({ data: [{ id: 'form-bad', name: 'Bad' }] }),
@@ -334,7 +334,7 @@ test('incomplete Meta lead is counted failed without creating a CRM lead', async
 
 test('webhook pending row and manual sync share dedupe and skip duplicate create', async () => {
   const admin = await registerVerifiedAdmin('SyncRace')
-  const { page } = await seedConnectedPage(admin, 'page-race')
+  const { page } = await seedConnectedPage(admin, `page-race-${Date.now()}`)
   const { MetaWebhookIngestion, Lead } = getModels()
   const { acceptWebhookPayload } = require('../src/services/metaWebhookService')
   const { processDueIngestions } = require('../src/services/metaLeadService')

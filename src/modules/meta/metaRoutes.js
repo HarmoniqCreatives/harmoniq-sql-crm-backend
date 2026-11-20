@@ -5,6 +5,7 @@ const { createKeyedLimiter } = require('../../middleware/rateLimit')
 const { permissionKeys } = require('../../utils/enums')
 const {
   deleteProfile,
+  getAutoSyncConfig,
   getAvailablePages,
   getConnections,
   getDefaultAssignee,
@@ -48,6 +49,11 @@ metaRouter.post('/profiles', requirePermission(permissionKeys.metaManage), async
 metaRouter.patch('/profiles/:id', requirePermission(permissionKeys.metaManage), asyncHandler(patchProfile))
 metaRouter.delete('/profiles/:id', requirePermission(permissionKeys.metaManage), asyncHandler(deleteProfile))
 
+metaRouter.get(
+  '/auto-sync-config',
+  requirePermission(permissionKeys.metaView),
+  asyncHandler(getAutoSyncConfig),
+)
 metaRouter.get(
   '/default-assignee',
   requirePermission(permissionKeys.metaView),

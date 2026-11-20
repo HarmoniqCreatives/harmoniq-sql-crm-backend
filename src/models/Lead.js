@@ -23,8 +23,22 @@ function defineLead(sequelize) {
     campaignName: { type: DataTypes.STRING(255), allowNull: false, defaultValue: '' },
     /** Graph campaign `effective_status` (e.g. ACTIVE, PAUSED). Empty when unknown. */
     campaignStatus: { type: DataTypes.STRING(32), allowNull: false, defaultValue: '' },
+    adId: { type: DataTypes.STRING(128), allowNull: false, defaultValue: '' },
+    adName: { type: DataTypes.STRING(255), allowNull: false, defaultValue: '' },
+    adSetId: { type: DataTypes.STRING(128), allowNull: false, defaultValue: '' },
+    adSetName: { type: DataTypes.STRING(255), allowNull: false, defaultValue: '' },
+    formId: { type: DataTypes.STRING(64), allowNull: false, defaultValue: '' },
+    formName: { type: DataTypes.STRING(255), allowNull: false, defaultValue: '' },
     facebookPageId: { type: DataTypes.STRING(128), allowNull: false, defaultValue: '' },
     facebookPageName: { type: DataTypes.STRING(255), allowNull: false, defaultValue: '' },
+    /** pending|completed|partial|failed|not_applicable — Meta advertising metadata only. */
+    metaEnrichmentStatus: {
+      type: DataTypes.STRING(32),
+      allowNull: false,
+      defaultValue: 'not_applicable',
+    },
+    /** Short enrichment failure category (no secrets / PII). */
+    metaEnrichmentError: { type: DataTypes.STRING(80), allowNull: false, defaultValue: '' },
     statusId: { type: DataTypes.CHAR(36), allowNull: false },
     primaryAgentId: { type: DataTypes.CHAR(36), allowNull: true },
     secondaryAgentId: { type: DataTypes.CHAR(36), allowNull: true },

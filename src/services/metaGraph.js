@@ -512,6 +512,32 @@ async function readCampaign(accessToken, campaignId) {
   }
 }
 
+/**
+ * Soft-fail named Graph object read (ads / forms). Never throws.
+ * @returns {Promise<{ name: string, errorCode: string }>}
+ */
+async function readNamedObject(accessToken, objectId, options = {}) {
+  if (!objectId) return { name: '', errorCode: '' }
+  const fields = options.fields || 'name'
+  const purpose = options.purpose || 'ads'
+  const url = new URL(`https://graph.facebook.com/${readGraphVersion()}/${objectId}`)
+  url.searchParams.set('fields', fields)
+  url.searchParams.set('access_token', accessToken)
+  try {
+    const response = await fetchImpl(url)
+    const payload = await readGraphPayload(response, { purpose })
+    return {
+      name: payload.name ? String(payload.name) : '',
+      errorCode: '',
+    }
+  } catch (error) {
+    let errorCode = 'META_GRAPH_ERROR'
+    if (error && error.code) errorCode = String(error.code)
+    else if (error && error.message) errorCode = String(error.message).slice(0, 80)
+    return { name: '', errorCode }
+  }
+}
+
 module.exports = {
   debugAccessToken,
   exchangeAuthorizationCode,
@@ -529,6 +555,7 @@ module.exports = {
   readLeadgenForms,
   readObjectName,
   readCampaign,
+  readNamedObject,
   readPageBusinessAdAccounts,
   readPagedEdge,
   readUserAdAccounts,

@@ -349,8 +349,16 @@ async function createLead(auth, body, options = {}) {
   const campaignId = readText(body, 'campaignId')
   const campaignName = readText(body, 'campaignName')
   const campaignStatus = readText(body, 'campaignStatus')
+  const adId = readText(body, 'adId')
+  const adName = readText(body, 'adName')
+  const adSetId = readText(body, 'adSetId')
+  const adSetName = readText(body, 'adSetName')
+  const formId = readText(body, 'formId')
+  const formName = readText(body, 'formName')
   const facebookPageId = readText(body, 'facebookPageId')
   const facebookPageName = readText(body, 'facebookPageName')
+  const metaEnrichmentStatus = readText(body, 'metaEnrichmentStatus') || 'not_applicable'
+  const metaEnrichmentError = readText(body, 'metaEnrichmentError')
   let metaCreatedAt = null
   if (body && body.metaCreatedAt) {
     const parsed = body.metaCreatedAt instanceof Date
@@ -378,8 +386,16 @@ async function createLead(auth, body, options = {}) {
       campaignId,
       campaignName,
       campaignStatus,
+      adId,
+      adName,
+      adSetId,
+      adSetName,
+      formId,
+      formName,
       facebookPageId,
       facebookPageName,
+      metaEnrichmentStatus: metaImport ? metaEnrichmentStatus : 'not_applicable',
+      metaEnrichmentError: metaImport ? metaEnrichmentError : '',
       company,
       nextFollowUpAt,
       feedbacks,
@@ -483,8 +499,16 @@ async function createLeadWithRetry(context, attempt = 0) {
     campaignId,
     campaignName,
     campaignStatus,
+    adId,
+    adName,
+    adSetId,
+    adSetName,
+    formId,
+    formName,
     facebookPageId,
     facebookPageName,
+    metaEnrichmentStatus,
+    metaEnrichmentError,
     company,
     nextFollowUpAt,
     feedbacks,
@@ -505,8 +529,16 @@ async function createLeadWithRetry(context, attempt = 0) {
         campaignId: campaignId || '',
         campaignName: campaignName || '',
         campaignStatus: campaignStatus || '',
+        adId: adId || '',
+        adName: adName || '',
+        adSetId: adSetId || '',
+        adSetName: adSetName || '',
+        formId: formId || '',
+        formName: formName || '',
         facebookPageId: facebookPageId || '',
         facebookPageName: facebookPageName || '',
+        metaEnrichmentStatus: metaEnrichmentStatus || 'not_applicable',
+        metaEnrichmentError: metaEnrichmentError || '',
         statusId: status.id,
         primaryAgentId: agents.primary ? agents.primary.id : null,
         secondaryAgentId: agents.secondary ? agents.secondary.id : null,

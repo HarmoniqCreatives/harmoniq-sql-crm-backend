@@ -31,6 +31,8 @@ const {
   verifyWebhookChallenge,
   verifyWebhookSignature,
 } = require('../../services/metaWebhookService')
+const { readMetaAutoSyncConfig } = require('../../config/metaAutoSync')
+const { syncJobsWorkerAutorunEnabled } = require('../../services/metaAutoSyncService')
 const { errors } = require('../../utils/errors')
 const { messages } = require('../../utils/messages')
 
@@ -204,8 +206,24 @@ async function patchDefaultAssignee(req, res) {
   })
 }
 
+/**
+ * Read-only Auto Sync visibility (env-driven). Does not change webhook or Manual Sync.
+ */
+async function getAutoSyncConfig(req, res) {
+  const config = readMetaAutoSyncConfig()
+  res.status(200).json({
+    data: {
+      enabled: config.enabled,
+      intervalMinutes: config.intervalMinutes,
+      workerAutorunEnabled: syncJobsWorkerAutorunEnabled(),
+      note: messages.metaAutoSyncConfigNote,
+    },
+  })
+}
+
 module.exports = {
   deleteProfile,
+  getAutoSyncConfig,
   getAvailablePages,
   getConnections,
   getDefaultAssignee,

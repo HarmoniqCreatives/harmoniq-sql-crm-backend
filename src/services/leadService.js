@@ -3,6 +3,7 @@ const { Op } = require('sequelize')
 const { getModels } = require('../models')
 const { allocateLeadNumber } = require('./leadCounter')
 const { calendarDate, isOverdue } = require('./leadOverdue')
+const { companyDayBounds } = require('../utils/timezone')
 const { presentLead } = require('../modules/leads/leadPresenter')
 const {
   readActivity,
@@ -165,7 +166,9 @@ async function buildLeadQuery(auth, query) {
     }
   }
 
-  appendLeadDateRangeFilter(and, query)
+  const { Company } = getModels()
+  const company = await Company.findByPk(auth.companyId, { attributes: ['timezone'] })
+  appendLeadDateRangeFilter(and, query, company ? company.timezone : '')
 
   if (and.length > 0) {
     filter[Op.and] = and
@@ -174,18 +177,22 @@ async function buildLeadQuery(auth, query) {
 }
 
 /**
- * Parses YYYY-MM-DD (or ISO) into a Date boundary.
+ * Parses YYYY-MM-DD (or ISO) into a Date boundary in the company timezone when possible.
  * @param {unknown} value
- * @param {{ endOfDay?: boolean }} options
+ * @param {{ endOfDay?: boolean, timeZone?: string }} options
  * @returns {Date|null}
  */
-function readLeadDateBoundary(value, { endOfDay = false } = {}) {
+function readLeadDateBoundary(value, { endOfDay = false, timeZone = '' } = {}) {
   const text = String(value || '').trim()
   if (!text) {
     return null
   }
   if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
-    return new Date(`${text}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}Z`)
+    const bounds = companyDayBounds(text, timeZone)
+    if (!bounds) {
+      throw new AppError(errors.reportDateRangeInvalid, 400)
+    }
+    return endOfDay ? bounds.end : bounds.start
   }
   const date = new Date(text)
   if (Number.isNaN(date.getTime())) {
@@ -197,12 +204,20 @@ function readLeadDateBoundary(value, { endOfDay = false } = {}) {
 /**
  * Meta leads (non-empty metaLeadId) filter on metaCreatedAt.
  * Manual / non-Meta leads filter on CRM createdAt.
+ * Date-only bounds use the company IANA timezone (DST-aware).
  * @param {object[]} and
  * @param {object} query
+ * @param {string} [timeZone]
  */
-function appendLeadDateRangeFilter(and, query) {
-  const start = readLeadDateBoundary(query.startDate || query.from, { endOfDay: false })
-  const end = readLeadDateBoundary(query.endDate || query.to, { endOfDay: true })
+function appendLeadDateRangeFilter(and, query, timeZone = '') {
+  const start = readLeadDateBoundary(query.startDate || query.from, {
+    endOfDay: false,
+    timeZone,
+  })
+  const end = readLeadDateBoundary(query.endDate || query.to, {
+    endOfDay: true,
+    timeZone,
+  })
   if ((start && !end) || (!start && end)) {
     throw new AppError(errors.reportDateRangeInvalid, 400)
   }
@@ -277,7 +292,7 @@ async function listLeads(auth, query) {
   const { Lead } = getModels()
   const { where, include } = await buildLeadQuery(auth, query)
   const page = readPageNumber(query.page, 1, 10000)
-  const limit = readPageNumber(query.limit, 20, 50)
+  const limit = readPageNumber(query.limit, 10, 100)
   const order = readSort(query)
   const { rows, count } = await Lead.findAndCountAll({
     where,

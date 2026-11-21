@@ -592,7 +592,7 @@ function buildReportEmailBody({
       lines.push(`- ${item.filename} (${item.leadCount} leads, Page Type: ${item.pageType})`)
     }
   }
-  lines.push('', 'This is an automated message from Harmoniq CRM.')
+  lines.push('', 'This is an automated message from Melo.')
   const text = lines.join('\n')
   const html = [
     `<p>${escapeHtml(title)}</p>`,
@@ -616,7 +616,7 @@ function buildReportEmailBody({
     }
     html.push('</ul>')
   }
-  html.push('<p>This is an automated message from Harmoniq CRM.</p>')
+  html.push('<p>This is an automated message from Melo.</p>')
   return { text, html: html.join('') }
 }
 

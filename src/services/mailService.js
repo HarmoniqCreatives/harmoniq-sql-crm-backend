@@ -1,4 +1,5 @@
 const nodemailer = require('nodemailer')
+const { PRODUCT_NAME } = require('../config/brand')
 const { AppError, errors } = require('../utils/errors')
 
 const memoryOutbox = []
@@ -316,7 +317,7 @@ async function sendVerificationEmail(details) {
   const link = `${readAppBaseUrl()}/verify-email?token=${encodeURIComponent(details.token)}`
   await sendMail('verification', {
     to: details.to,
-    subject: 'Verify your Harmoniq Creative CRM email',
+    subject: `Verify your ${PRODUCT_NAME} email`,
     text: [
       `Hello ${details.recipientName},`,
       '',
@@ -327,7 +328,7 @@ async function sendVerificationEmail(details) {
     ].join('\n'),
     html: [
       `<p>Hello ${escapeHtml(details.recipientName)},</p>`,
-      `<p>Confirm ${escapeHtml(details.companyName)} in Harmoniq Creative CRM.</p>`,
+      `<p>Confirm ${escapeHtml(details.companyName)} in ${PRODUCT_NAME}.</p>`,
       `<p><a href="${escapeHtml(link)}">Verify email</a></p>`,
       '<p>This link expires in 24 hours.</p>',
     ].join(''),
@@ -339,7 +340,7 @@ async function sendPasswordResetEmail(details) {
   const link = `${readAppBaseUrl()}/reset-password?token=${encodeURIComponent(details.token)}`
   await sendMail('password_reset', {
     to: details.to,
-    subject: 'Reset your Harmoniq Creative CRM password',
+    subject: `Reset your ${PRODUCT_NAME} password`,
     text: [
       `Hello ${details.recipientName},`,
       '',
@@ -387,8 +388,8 @@ async function sendInvitationEmail(details) {
   return { link }
 }
 
-const DEFAULT_NEW_LEAD_SUBJECT = 'New Lead Assigned – Harmoniq CRM'
-const DEFAULT_TRANSFER_SUBJECT = 'Lead Transferred to You – Harmoniq CRM'
+const DEFAULT_NEW_LEAD_SUBJECT = `New Lead Assigned – ${PRODUCT_NAME}`
+const DEFAULT_TRANSFER_SUBJECT = `Lead Transferred to You – ${PRODUCT_NAME}`
 
 function assignmentIntroLine(emailKind) {
   if (emailKind === 'transfer') {
@@ -415,7 +416,7 @@ function buildAssignmentMessageText(details) {
       lines.push(`Transfer Reason: ${details.transferReason}`)
     }
   }
-  lines.push('', 'Please contact the lead and follow up.', '', 'Regards,', 'Harmoniq CRM')
+  lines.push('', 'Please contact the lead and follow up.', '', 'Regards,', PRODUCT_NAME)
   return lines.join('\n')
 }
 
@@ -438,7 +439,7 @@ function buildAssignmentMessageHtml(details) {
     ...transferBits,
     '</p>',
     '<p>Please contact the lead and follow up.</p>',
-    '<p>Regards,<br>Harmoniq CRM</p>',
+    `<p>Regards,<br>${PRODUCT_NAME}</p>`,
   ].join('')
 }
 

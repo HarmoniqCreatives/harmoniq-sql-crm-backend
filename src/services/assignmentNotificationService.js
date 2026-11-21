@@ -1,4 +1,5 @@
 const { getModels } = require('../models')
+const { PRODUCT_NAME } = require('../config/brand')
 const mailService = require('./mailService')
 const { userStatuses } = require('../utils/enums')
 
@@ -8,8 +9,8 @@ const EMAIL_KINDS = {
   transfer: 'transfer',
 }
 const ASSIGNMENT_EMAIL_SUBJECTS = {
-  new_lead: 'New Lead Assigned – Harmoniq CRM',
-  transfer: 'Lead Transferred to You – Harmoniq CRM',
+  new_lead: `New Lead Assigned – ${PRODUCT_NAME}`,
+  transfer: `Lead Transferred to You – ${PRODUCT_NAME}`,
 }
 
 /** Short-lived keys so shared createLead paths cannot double-queue the same notice. */

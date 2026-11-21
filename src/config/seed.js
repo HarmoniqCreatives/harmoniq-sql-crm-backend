@@ -110,7 +110,17 @@ const catalogSeeds = [
 const companyDefaults = {
   timezone: 'Asia/Kolkata',
   baseCurrency: currencies.inr,
-  enabledCurrencies: [currencies.inr, currencies.aed, currencies.usd, currencies.eur],
+  enabledCurrencies: [
+    currencies.inr,
+    currencies.aed,
+    currencies.usd,
+    currencies.eur,
+    currencies.gbp,
+    currencies.cad,
+    currencies.qar,
+    currencies.aud,
+    currencies.pkr,
+  ],
 }
 
 module.exports = { roleSeeds, catalogSeeds, companyDefaults, adminUserPermissions }

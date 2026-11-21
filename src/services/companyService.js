@@ -1,8 +1,20 @@
 const { getModels } = require('../models')
-const { timezones } = require('../utils/enums')
+const { currencies, timezones } = require('../utils/enums')
 const { AppError, errors } = require('../utils/errors')
 const { readText } = require('../utils/helpers')
 const { presentEmailReports } = require('./emailReportService')
+
+function mergeEnabledCurrencies(companyEnabled) {
+  const known = Object.values(currencies)
+  const existing = Array.isArray(companyEnabled) ? companyEnabled : []
+  const merged = []
+  for (const code of [...existing, ...known]) {
+    if (known.includes(code) && !merged.includes(code)) {
+      merged.push(code)
+    }
+  }
+  return merged
+}
 
 /**
  * Company defaults used by Settings and (later) lead currency / follow-up timezone.
@@ -15,9 +27,7 @@ const { presentEmailReports } = require('./emailReportService')
  * @returns {object}
  */
 function presentCompany(company, emailReports) {
-  const enabled = Array.isArray(company.enabledCurrencies)
-    ? company.enabledCurrencies
-    : []
+  const enabled = mergeEnabledCurrencies(company.enabledCurrencies)
   const payload = {
     id: company.id,
     name: company.name,
@@ -65,12 +75,17 @@ async function updateCompany(auth, body) {
     throw new AppError(errors.timezoneInvalid, 400)
   }
   const baseCurrency = readText(body, 'baseCurrency')
-  const enabled = Array.isArray(company.enabledCurrencies) ? company.enabledCurrencies : []
-  if (!enabled.includes(baseCurrency)) {
+  const allowedCurrencies = Object.values(currencies)
+  if (!allowedCurrencies.includes(baseCurrency)) {
     throw new AppError(errors.currencyInvalid, 400)
+  }
+  const enabled = mergeEnabledCurrencies(company.enabledCurrencies)
+  if (!enabled.includes(baseCurrency)) {
+    enabled.push(baseCurrency)
   }
   company.timezone = timezone
   company.baseCurrency = baseCurrency
+  company.enabledCurrencies = enabled
   await company.save()
   const emailReports = await presentEmailReports(company)
   return presentCompany(company, emailReports)

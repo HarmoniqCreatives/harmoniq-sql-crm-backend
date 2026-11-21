@@ -101,6 +101,25 @@ const timezones = {
   dubai: 'Asia/Dubai',
   kolkata: 'Asia/Kolkata',
   karachi: 'Asia/Karachi',
+  qatar: 'Asia/Qatar',
+  london: 'Europe/London',
+  paris: 'Europe/Paris',
+  berlin: 'Europe/Berlin',
+  amsterdam: 'Europe/Amsterdam',
+  rome: 'Europe/Rome',
+  madrid: 'Europe/Madrid',
+  toronto: 'America/Toronto',
+  vancouver: 'America/Vancouver',
+  edmonton: 'America/Edmonton',
+  winnipeg: 'America/Winnipeg',
+  halifax: 'America/Halifax',
+  stJohns: 'America/St_Johns',
+  sydney: 'Australia/Sydney',
+  melbourne: 'Australia/Melbourne',
+  brisbane: 'Australia/Brisbane',
+  perth: 'Australia/Perth',
+  adelaide: 'Australia/Adelaide',
+  darwin: 'Australia/Darwin',
 }
 
 const currencies = {
@@ -109,6 +128,10 @@ const currencies = {
   pkr: 'PKR',
   usd: 'USD',
   eur: 'EUR',
+  gbp: 'GBP',
+  cad: 'CAD',
+  qar: 'QAR',
+  aud: 'AUD',
 }
 
 const leadSources = {

@@ -21,7 +21,7 @@ const permissionRegistry = [
   { key: 'leads.edit', module: 'leads', description: 'Edit leads' },
   { key: 'leads.delete', module: 'leads', description: 'Delete leads' },
   { key: 'leads.assign', module: 'leads', description: 'Assign leads' },
-  { key: 'leads.bulk', module: 'leads', description: 'Export leads (CSV/XLSX)' },
+  { key: 'leads.bulk', module: 'leads', description: 'Bulk Access — export leads (CSV/XLSX)' },
   { key: 'leads.bulk_assign', module: 'leads', description: 'Bulk assign leads' },
   { key: 'leads.bulk_transfer', module: 'leads', description: 'Bulk transfer leads' },
   { key: 'leads.bulk_delete', module: 'leads', description: 'Bulk delete leads' },

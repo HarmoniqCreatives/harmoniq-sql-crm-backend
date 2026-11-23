@@ -65,6 +65,7 @@ const requireAuth = asyncHandler(async (req, res, next) => {
 
 /**
  * Requires that `req.auth.role.permissions` contains the given key.
+ * Protected Super Admin roles pass every permission check (legacy Faloniq parity).
  *
  * @param {string} permission e.g. `users.edit`
  * @returns {import('express').RequestHandler}
@@ -73,6 +74,10 @@ function requirePermission(permission) {
   return asyncHandler(async (req, res, next) => {
     if (!req.auth || !req.auth.role) {
       throw new AppError(errors.unauthorized, 401)
+    }
+    if (req.auth.role.isProtected) {
+      next()
+      return
     }
     const permissions = req.auth.role.permissions || []
     if (!permissions.includes(permission)) {
@@ -84,6 +89,7 @@ function requirePermission(permission) {
 
 /**
  * Requires at least one of the listed permissions (useful for shared list endpoints).
+ * Protected Super Admin roles pass every permission check (legacy Faloniq parity).
  *
  * @param {string[]} permissionList
  * @returns {import('express').RequestHandler}
@@ -92,6 +98,10 @@ function requireAnyPermission(permissionList) {
   return asyncHandler(async (req, res, next) => {
     if (!req.auth || !req.auth.role) {
       throw new AppError(errors.unauthorized, 401)
+    }
+    if (req.auth.role.isProtected) {
+      next()
+      return
     }
     const permissions = req.auth.role.permissions || []
     const allowed = permissionList.some((key) => permissions.includes(key))

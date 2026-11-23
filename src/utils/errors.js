@@ -39,6 +39,8 @@ const errors = {
   unauthorized: 'Sign in to continue.',
   forbidden: 'You do not have permission to do that.',
   mailNotConfigured: 'Email is not configured on the server.',
+  mailFromEmailInvalid: 'MAIL_FROM_EMAIL must be a valid email address verified with your email provider (Resend, SMTP, or Gmail).',
+  mailFromMissing: 'Email is not configured. Set MAIL_FROM_EMAIL (preferred) or legacy MAIL_FROM.',
   signupEmailFailed: 'The verification email could not be sent. You can try again.',
   resetEmailFailed: 'The reset email could not be sent. You can try again.',
   refreshInvalid: 'Your session has expired. Sign in again.',

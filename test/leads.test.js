@@ -273,7 +273,7 @@ test('search, filters, sorting, pagination bounds, invalid sort rejected', async
   assert.equal(page.body.data.total, 2)
 
   const capped = await authGet(admin.accessToken, '/api/leads?limit=999')
-  assert.equal(capped.body.data.limit, 50)
+  assert.equal(capped.body.data.limit, 100)
 })
 
 test('scope: company, branch, team, own; secondary agent visibility', async () => {

@@ -1,10 +1,13 @@
 const nodemailer = require('nodemailer')
 const { PRODUCT_NAME } = require('../config/brand')
 const { AppError, errors } = require('../utils/errors')
+const { isEmail, normalizeEmail } = require('../utils/helpers')
 
 const memoryOutbox = []
 /** Hard timeout so Render SMTP hangs cannot stall the API for minutes. */
 const MAIL_TIMEOUT_MS = 10_000
+/** Product sender display name for all automatic CRM emails. */
+const DEFAULT_MAIL_FROM_NAME = 'Melo'
 
 /**
  * Mail provider abstraction for verification, password reset, and invitations.
@@ -13,6 +16,76 @@ const MAIL_TIMEOUT_MS = 10_000
  * local development. Invite links are built from `APP_BASE_URL` and never fall
  * back to localhost in production. Logs omit tokens and credentials.
  */
+
+/**
+ * Strips header-breaking characters from a From display name.
+ * @param {string} value
+ * @returns {string}
+ */
+function sanitizeMailFromName(value) {
+  const cleaned = String(value || '').replace(/[<>\r\n]/g, '').trim()
+  if (!cleaned) {
+    return DEFAULT_MAIL_FROM_NAME
+  }
+  return cleaned
+}
+
+/**
+ * Resolves the From display name (defaults to Melo).
+ * @returns {string}
+ */
+function resolveMailFromName() {
+  if (process.env.MAIL_FROM_NAME && String(process.env.MAIL_FROM_NAME).trim()) {
+    return sanitizeMailFromName(process.env.MAIL_FROM_NAME)
+  }
+  return DEFAULT_MAIL_FROM_NAME
+}
+
+/**
+ * Extracts an email address from a bare address or `Name <email>` header.
+ * @param {string} value
+ * @returns {string}
+ */
+function extractEmailFromMailFrom(value) {
+  const trimmed = String(value || '').trim()
+  if (!trimmed) {
+    return ''
+  }
+  const angled = trimmed.match(/<([^>]+)>/)
+  if (angled) {
+    return normalizeEmail(angled[1])
+  }
+  const normalized = normalizeEmail(trimmed)
+  return isEmail(normalized) ? normalized : ''
+}
+
+/**
+ * Builds the RFC From value for every automatic CRM email.
+ * Prefer MAIL_FROM_EMAIL + MAIL_FROM_NAME; legacy MAIL_FROM keeps the email
+ * but always uses Melo (or MAIL_FROM_NAME) as the display name.
+ *
+ * @returns {string} e.g. `Melo <erp.accounts@suvidretail.in>`
+ */
+function resolveMailFrom() {
+  const name = resolveMailFromName()
+  const emailRaw = process.env.MAIL_FROM_EMAIL
+  if (emailRaw && String(emailRaw).trim()) {
+    const email = normalizeEmail(String(emailRaw).trim())
+    if (!isEmail(email)) {
+      throw new AppError(errors.mailFromEmailInvalid, 503)
+    }
+    return `${name} <${email}>`
+  }
+  const legacy = process.env.MAIL_FROM
+  if (!legacy || !String(legacy).trim()) {
+    return ''
+  }
+  const email = extractEmailFromMailFrom(legacy)
+  if (email) {
+    return `${name} <${email}>`
+  }
+  return String(legacy).trim()
+}
 
 function normalizeFrontendBase(value) {
   return String(value || '').trim().replace(/\/+$/, '')
@@ -119,12 +192,18 @@ function warnMailProviderAtStartup() {
 }
 
 function isSmtpConfigured() {
+  let from = ''
+  try {
+    from = resolveMailFrom()
+  } catch {
+    from = ''
+  }
   return Boolean(
     process.env.SMTP_HOST
     && process.env.SMTP_PORT
     && process.env.SMTP_USER
     && process.env.SMTP_PASS
-    && process.env.MAIL_FROM,
+    && from,
   )
 }
 
@@ -235,12 +314,16 @@ async function sendViaSmtp(payload) {
     },
   })
   const files = normalizeMailAttachments(payload.attachments)
+  const from = payload.from || resolveMailFrom()
+  if (!from) {
+    throw new AppError(errors.mailNotConfigured, 503)
+  }
   const mail = {
     to: payload.to,
     subject: payload.subject,
     text: payload.text,
     html: payload.html,
-    from: process.env.MAIL_FROM,
+    from,
   }
   if (files.length > 0) {
     mail.attachments = files.map((file) => ({
@@ -254,12 +337,13 @@ async function sendViaSmtp(payload) {
 
 async function sendViaResend(payload) {
   const apiKey = process.env.RESEND_API_KEY
-  if (!apiKey || !process.env.MAIL_FROM) {
+  const from = payload.from || resolveMailFrom()
+  if (!apiKey || !from) {
     throw new AppError(errors.mailNotConfigured, 503)
   }
   const recipients = normalizeRecipientList(payload.to)
   const body = {
-    from: process.env.MAIL_FROM,
+    from,
     to: recipients,
     subject: payload.subject,
     text: payload.text,
@@ -294,14 +378,19 @@ async function sendViaResend(payload) {
 
 async function sendMail(kind, payload) {
   const provider = readMailProvider() || (process.env.NODE_ENV === 'production' ? 'resend' : 'smtp')
+  const from = resolveMailFrom()
+  const mailPayload = {
+    ...payload,
+    from: from || payload.from || '',
+  }
   try {
     let info
     if (provider === 'memory') {
-      info = await sendViaMemory(payload)
+      info = await sendViaMemory(mailPayload)
     } else if (provider === 'resend') {
-      info = await sendViaResend(payload)
+      info = await sendViaResend(mailPayload)
     } else if (provider === 'smtp') {
-      info = await sendViaSmtp(payload)
+      info = await sendViaSmtp(mailPayload)
     } else {
       throw new AppError(errors.mailProviderInvalid, 503)
     }
@@ -511,6 +600,10 @@ module.exports = {
   resolveAssignmentEmailSubject,
   buildAssignmentMessageText,
   buildAssignmentMessageHtml,
+  resolveMailFrom,
+  resolveMailFromName,
+  sanitizeMailFromName,
+  DEFAULT_MAIL_FROM_NAME,
   DEFAULT_NEW_LEAD_SUBJECT,
   DEFAULT_TRANSFER_SUBJECT,
   shortMailError,

@@ -4,13 +4,31 @@ const { roleAuthority, roleKeys } = require('../utils/enums')
 const { AppError, errors } = require('../utils/errors')
 
 /**
+ * True when the role is a protected Super Admin (full privilege grantor).
+ * @param {{ isProtected?: boolean, key?: string }|null|undefined} role
+ * @returns {boolean}
+ */
+function isProtectedGrantor(role) {
+  return Boolean(role && (role.isProtected || role.key === roleKeys.superAdmin))
+}
+
+/**
  * Returns the permission keys held by the authenticated role.
+ * Protected Super Admin is treated as holding the full known registry
+ * so they can grant keys such as `leads.bulk` even if a stale role row
+ * omitted newer keys from its JSON array.
  *
- * @param {{ role?: { permissions?: string[] } }} auth
+ * @param {{ role?: { permissions?: string[], isProtected?: boolean, key?: string } }} auth
  * @returns {string[]}
  */
 function authPermissions(auth) {
-  if (!auth || !auth.role || !Array.isArray(auth.role.permissions)) {
+  if (!auth || !auth.role) {
+    return []
+  }
+  if (isProtectedGrantor(auth.role)) {
+    return listPermissions().map((row) => row.key)
+  }
+  if (!Array.isArray(auth.role.permissions)) {
     return []
   }
   return auth.role.permissions
@@ -20,12 +38,16 @@ function authPermissions(auth) {
  * Checks whether the auth context includes a permission key.
  *
  * Frontend checks are UX only; this helper backs server-side enforcement.
+ * Protected Super Admin passes every known permission key.
  *
  * @param {object} auth
  * @param {string} permissionKey
  * @returns {boolean}
  */
 function hasPermission(auth, permissionKey) {
+  if (isProtectedGrantor(auth && auth.role)) {
+    return isKnownPermission(permissionKey) || authPermissions(auth).includes(permissionKey)
+  }
   return authPermissions(auth).includes(permissionKey)
 }
 
@@ -49,16 +71,21 @@ function roleRank(role) {
 /**
  * Ensures every permission in a set is known and already held by the actor.
  * Prevents granting privileges the actor does not possess.
+ * Protected Super Admin may grant any known registry permission (legacy parity).
  *
  * @param {object} auth
  * @param {string[]} permissions
  * @throws {AppError} 400 unknown permission, 403 escalation
  */
 function assertCanAssignPermissions(auth, permissions) {
+  const protectedGrantor = isProtectedGrantor(auth && auth.role)
   const held = new Set(authPermissions(auth))
   for (const key of permissions) {
-    if (!isKnownPermission(key) && !held.has(key)) {
+    if (!isKnownPermission(key)) {
       throw new AppError(errors.rolePermissionsInvalid, 400)
+    }
+    if (protectedGrantor) {
+      continue
     }
     if (!held.has(key)) {
       throw new AppError(errors.privilegeEscalation, 403)
@@ -197,6 +224,7 @@ function presentPermissionMatrix() {
 module.exports = {
   authPermissions,
   hasPermission,
+  isProtectedGrantor,
   roleRank,
   assertCanAssignPermissions,
   assertCanAssignRole,

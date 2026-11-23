@@ -422,3 +422,106 @@ test('API responses never include password hashes or raw invite tokens in invita
   const row = await Invitation.findByPk(created.body.data.invitation.id)
   assert.equal(row.tokenHash, hashSecret(token))
 })
+
+test('Super Admin can grant Bulk Access (leads.bulk) to Manager and it persists for export', async () => {
+  const admin = await registerVerifiedAdmin('BulkGrant')
+  const { Role, User } = getModels()
+  const roles = await authGet(admin.accessToken, '/api/roles')
+  assert.equal(roles.status, 200)
+  const matrixLeads = roles.body.data.permissionMatrix.leads || []
+  assert.ok(matrixLeads.some((row) => row.key === permissionKeys.leadsBulk))
+
+  const managerRole = roles.body.data.roles.find((role) => role.key === roleKeys.manager)
+  assert.ok(managerRole)
+  assert.equal((managerRole.permissions || []).includes(permissionKeys.leadsBulk), false)
+
+  const nextPermissions = [...new Set([
+    ...(managerRole.permissions || []),
+    permissionKeys.leadsBulk,
+  ])]
+  const patched = await authPatch(admin.accessToken, `/api/roles/${managerRole.id}`, {
+    permissions: nextPermissions,
+  })
+  assert.equal(patched.status, 200, JSON.stringify(patched.body))
+  assert.equal(patched.body.data.role.permissions.includes(permissionKeys.leadsBulk), true)
+
+  const reloaded = await Role.findByPk(managerRole.id)
+  assert.equal(reloaded.permissions.includes(permissionKeys.leadsBulk), true)
+
+  const listedAgain = await authGet(admin.accessToken, '/api/roles')
+  const managerAgain = listedAgain.body.data.roles.find((role) => role.key === roleKeys.manager)
+  assert.equal(managerAgain.permissions.includes(permissionKeys.leadsBulk), true)
+
+  const managerUser = await User.create({
+    id: uuidv4(),
+    companyId: admin.companyId,
+    roleId: managerRole.id,
+    name: 'Bulk Manager',
+    email: `bulk.manager.${Date.now()}@example.com`,
+    passwordHash: await require('../src/utils/helpers').hashPassword('Password1!'),
+    status: 'ACTIVE',
+    emailVerified: true,
+  })
+  const managerLogin = await request(app).post('/api/auth/login').send({
+    email: managerUser.email,
+    password: 'Password1!',
+  })
+  assert.equal(managerLogin.status, 200)
+  assert.equal(
+    (managerLogin.body.data.user.role.permissions || []).includes(permissionKeys.leadsBulk),
+    true,
+  )
+
+  const exportOk = await authGet(managerLogin.body.data.accessToken, '/api/leads/export?format=xlsx')
+  assert.equal(exportOk.status, 200)
+})
+
+test('role without leads.bulk cannot export; agent cannot grant Bulk Access', async () => {
+  const admin = await registerVerifiedAdmin('BulkDeny')
+  const { Role, User } = getModels()
+  const roles = await authGet(admin.accessToken, '/api/roles')
+  const managerRole = roles.body.data.roles.find((role) => role.key === roleKeys.manager)
+  const agentRole = roles.body.data.roles.find((role) => role.key === roleKeys.agent)
+
+  const managerUser = await User.create({
+    id: uuidv4(),
+    companyId: admin.companyId,
+    roleId: managerRole.id,
+    name: 'No Bulk Manager',
+    email: `nobulk.manager.${Date.now()}@example.com`,
+    passwordHash: await require('../src/utils/helpers').hashPassword('Password1!'),
+    status: 'ACTIVE',
+    emailVerified: true,
+  })
+  const managerLogin = await request(app).post('/api/auth/login').send({
+    email: managerUser.email,
+    password: 'Password1!',
+  })
+  assert.equal(managerLogin.status, 200)
+  const exportForbidden = await authGet(managerLogin.body.data.accessToken, '/api/leads/export?format=xlsx')
+  assert.equal(exportForbidden.status, 403)
+
+  const agentUser = await User.create({
+    id: uuidv4(),
+    companyId: admin.companyId,
+    roleId: agentRole.id,
+    name: 'Agent Escalator',
+    email: `agent.esc.${Date.now()}@example.com`,
+    passwordHash: await require('../src/utils/helpers').hashPassword('Password1!'),
+    status: 'ACTIVE',
+    emailVerified: true,
+  })
+  const agentLogin = await request(app).post('/api/auth/login').send({
+    email: agentUser.email,
+    password: 'Password1!',
+  })
+  assert.equal(agentLogin.status, 200)
+  const escalate = await authPatch(agentLogin.body.data.accessToken, `/api/roles/${managerRole.id}`, {
+    permissions: [permissionKeys.leadsView, permissionKeys.leadsBulk],
+  })
+  assert.equal(escalate.status, 403)
+
+  // Manager seed must still omit Bulk Access by default (explicit grant only).
+  const freshManager = await Role.findByPk(managerRole.id)
+  assert.equal(freshManager.permissions.includes(permissionKeys.leadsBulk), false)
+})

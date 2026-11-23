@@ -116,10 +116,9 @@ async function createRole(auth, body) {
   if (!Object.values(roleScopes).includes(scope)) {
     throw new AppError(errors.requestFailed, 400)
   }
-  for (const key of permissions) {
-    if (!isKnownPermission(key)) {
-      throw new AppError(errors.rolePermissionsInvalid, 400)
-    }
+  const unknownOnCreate = permissions.filter((key) => !isKnownPermission(key))
+  if (unknownOnCreate.length) {
+    throw new AppError(errors.rolePermissionsInvalid, 400, 'APP_ERROR', { invalid: unknownOnCreate })
   }
   assertCanAssignPermissions(auth, permissions)
 
@@ -190,10 +189,9 @@ async function updateRole(auth, roleId, body) {
   }
   if (body.permissions !== undefined) {
     const permissions = readPermissions(body)
-    for (const key of permissions) {
-      if (!isKnownPermission(key)) {
-        throw new AppError(errors.rolePermissionsInvalid, 400)
-      }
+    const unknown = permissions.filter((key) => !isKnownPermission(key))
+    if (unknown.length) {
+      throw new AppError(errors.rolePermissionsInvalid, 400, 'APP_ERROR', { invalid: unknown })
     }
     assertCanAssignPermissions(auth, permissions)
     role.permissions = permissions

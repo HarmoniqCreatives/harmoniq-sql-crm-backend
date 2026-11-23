@@ -80,9 +80,11 @@ function roleRank(role) {
 function assertCanAssignPermissions(auth, permissions) {
   const protectedGrantor = isProtectedGrantor(auth && auth.role)
   const held = new Set(authPermissions(auth))
+  const unknown = []
   for (const key of permissions) {
     if (!isKnownPermission(key)) {
-      throw new AppError(errors.rolePermissionsInvalid, 400)
+      unknown.push(key)
+      continue
     }
     if (protectedGrantor) {
       continue
@@ -90,6 +92,9 @@ function assertCanAssignPermissions(auth, permissions) {
     if (!held.has(key)) {
       throw new AppError(errors.privilegeEscalation, 403)
     }
+  }
+  if (unknown.length) {
+    throw new AppError(errors.rolePermissionsInvalid, 400, 'APP_ERROR', { invalid: unknown })
   }
 }
 

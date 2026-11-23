@@ -3,7 +3,13 @@
  *
  * Future modules should call `registerPermission({ key, module, description })`
  * (or append here) so roles UI and escalation checks stay consistent.
+ *
+ * `isKnownPermission` also accepts keys from `enums.permissionKeys` so legacy
+ * aliases (users.manage / roles.manage) and forward-catalog keys already stored
+ * on role rows do not break role updates.
  */
+
+const { permissionKeys: enumPermissionKeys } = require('../utils/enums')
 
 const permissionRegistry = [
   { key: 'users.view', module: 'users', description: 'View the company user directory' },
@@ -68,8 +74,20 @@ function listPermissions() {
   })
 }
 
+const enumPermissionKeySet = new Set(Object.values(enumPermissionKeys))
+
+/**
+ * True when the key is grantable via the UI matrix or is a known enum / legacy alias.
+ * Role rows from migration seeds often still carry `users.manage`, `activities.manage`, etc.
+ *
+ * @param {string} key
+ * @returns {boolean}
+ */
 function isKnownPermission(key) {
-  return permissionRegistry.some((row) => row.key === key)
+  if (!key || typeof key !== 'string') {
+    return false
+  }
+  return permissionRegistry.some((row) => row.key === key) || enumPermissionKeySet.has(key)
 }
 
 function permissionKeysFromRegistry() {

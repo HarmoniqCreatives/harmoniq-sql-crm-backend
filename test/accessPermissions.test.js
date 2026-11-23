@@ -54,3 +54,30 @@ test('Admin who holds Bulk Access can assign it', () => {
     assertCanAssignPermissions(auth, [permissionKeys.leadsView, permissionKeys.leadsBulk])
   })
 })
+
+test('legacy enum aliases on a role payload are known and grantable by Super Admin', () => {
+  const { isKnownPermission } = require('../src/config/permissions')
+  assert.equal(isKnownPermission(permissionKeys.usersManage), true)
+  assert.equal(isKnownPermission(permissionKeys.activitiesManage), true)
+  assert.equal(isKnownPermission(permissionKeys.leadsBulkAssign), true)
+  assert.equal(isKnownPermission('not.a.real.permission'), false)
+
+  const auth = {
+    role: {
+      key: roleKeys.superAdmin,
+      isProtected: true,
+      permissions: [],
+    },
+  }
+  assert.doesNotThrow(() => {
+    assertCanAssignPermissions(auth, [
+      permissionKeys.leadsView,
+      permissionKeys.leadsBulk,
+      permissionKeys.leadsBulkAssign,
+      permissionKeys.leadsBulkDelete,
+      permissionKeys.leadsBulkTransfer,
+      permissionKeys.usersManage,
+      permissionKeys.activitiesManage,
+    ])
+  })
+})

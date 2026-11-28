@@ -7,6 +7,7 @@ const {
   emailReportFrequencies,
   emailReportMonthlySchedules,
   emailReportTypes,
+  permissionKeys,
   timezones,
 } = require('../utils/enums')
 const { AppError, errors } = require('../utils/errors')
@@ -16,6 +17,8 @@ const { calendarDate } = require('./leadOverdue')
 const { toXlsx } = require('./leadExportService')
 const { presentLeads } = require('./leadService')
 const mailService = require('./mailService')
+const { hasPermission } = require('./accessService')
+const { deriveIsDeleted, markRestored, markSoftDeleted } = require('../utils/softDelete')
 
 const EXCEL_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 
@@ -112,6 +115,9 @@ function presentEmailReport(report) {
     frequency: report.frequency,
     monthlySchedule: report.monthlySchedule || null,
     periodLabel: periodLabel(report),
+    deletedAt: report.deletedAt || null,
+    is_deleted: deriveIsDeleted(report),
+    isDeleted: deriveIsDeleted(report),
   }
 }
 
@@ -268,8 +274,38 @@ async function deleteEmailReport(auth, reportId) {
   if (!report) {
     throw new AppError(errors.emailReportNotFound, 404)
   }
-  await report.destroy()
+  await markSoftDeleted(report, { userId: auth.userId })
   return presentEmailReports(company)
+}
+
+async function listDeletedEmailReports(auth) {
+  if (!hasPermission(auth, permissionKeys.recycleBinView)) {
+    throw new AppError(errors.forbidden, 403)
+  }
+  const { CompanyEmailReport } = getModels()
+  const rows = await CompanyEmailReport.unscoped().findAll({
+    where: { companyId: auth.companyId, isDeleted: true },
+    order: [['deletedAt', 'DESC']],
+  })
+  return rows.map(presentEmailReport)
+}
+
+async function restoreEmailReport(auth, reportId) {
+  if (!hasPermission(auth, permissionKeys.recycleBinRestore)) {
+    throw new AppError(errors.forbidden, 403)
+  }
+  if (!isUuid(reportId)) {
+    throw new AppError(errors.emailReportNotFound, 404)
+  }
+  const { CompanyEmailReport } = getModels()
+  const report = await CompanyEmailReport.unscoped().findOne({
+    where: { id: reportId, companyId: auth.companyId, isDeleted: true },
+  })
+  if (!report) {
+    throw new AppError(errors.emailReportNotFound, 404)
+  }
+  await markRestored(report)
+  return { message: messages.emailReportRestored, report: presentEmailReport(report) }
 }
 
 function to24Hour(hour12, meridiem) {
@@ -909,6 +945,8 @@ module.exports = {
   createEmailReport,
   daysInMonth,
   deleteEmailReport,
+  listDeletedEmailReports,
+  restoreEmailReport,
   emailReportWorkerEnabled,
   isAtOrPastSendTime,
   normalizeReportInput,

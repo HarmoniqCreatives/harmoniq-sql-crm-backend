@@ -1,3 +1,11 @@
+const {
+  isolatedTestDbConfigured,
+  applyIsolatedTestDbEnv,
+  assertIsolatedTestDbOrThrow,
+} = require('./helpers/isolatedTestDb')
+assertIsolatedTestDbOrThrow()
+applyIsolatedTestDbEnv()
+
 const assert = require('node:assert/strict')
 const crypto = require('node:crypto')
 const { after, before, beforeEach, test } = require('node:test')

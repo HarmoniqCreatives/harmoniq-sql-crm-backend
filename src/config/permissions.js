@@ -31,6 +31,7 @@ const permissionRegistry = [
   { key: 'leads.bulk_assign', module: 'leads', description: 'Bulk assign leads' },
   { key: 'leads.bulk_transfer', module: 'leads', description: 'Bulk transfer leads' },
   { key: 'leads.bulk_delete', module: 'leads', description: 'Bulk delete leads' },
+  { key: 'leads.import', module: 'leads', description: 'Import leads from Excel' },
   { key: 'reports.view', module: 'reports', description: 'View reports' },
   { key: 'settings.manage', module: 'settings', description: 'Manage company settings and catalogs' },
   { key: 'meta.view', module: 'meta', description: 'View Meta connections and Pages' },
@@ -38,6 +39,8 @@ const permissionRegistry = [
   { key: 'meta.pages.manage', module: 'meta', description: 'Connect and disconnect Facebook Pages' },
   { key: 'whatsapp.manage', module: 'whatsapp', description: 'Manage WhatsApp Cloud API connection and settings' },
   { key: 'whatsapp.view_logs', module: 'whatsapp', description: 'View WhatsApp delivery and audit logs' },
+  { key: 'recycle_bin.view', module: 'recycle_bin', description: 'View soft-deleted records in the Recycle Bin' },
+  { key: 'recycle_bin.restore', module: 'recycle_bin', description: 'Restore soft-deleted records from the Recycle Bin' },
 ]
 
 /**

@@ -7,6 +7,8 @@ function defineLeadNote(sequelize) {
     leadId: { type: DataTypes.CHAR(36), allowNull: false },
     text: { type: DataTypes.STRING(2000), allowNull: false },
     createdBy: { type: DataTypes.CHAR(36), allowNull: false },
+    /** Free-text original author when Excel author cannot be matched to a company user. */
+    authorDisplayName: { type: DataTypes.STRING(120), allowNull: true },
   }, { tableName: 'lead_notes', updatedAt: true })
 }
 

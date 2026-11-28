@@ -7,6 +7,17 @@ logs/
 coverage/
 .DS_Store
 
+# SQL dumps / local backups — never commit (may contain PII)
+backups/
+*.sql
+!src/scripts/*.sql
+!scripts/*.sql
+
+# Firebase / GCP service account credentials
+*firebase*adminsdk*.json
+*serviceAccount*.json
+*-service-account*.json
+
 # Private migration exports (unredacted; write outside repo only)
 **/production-11-user-export.json
 **/production-*-user-export.json

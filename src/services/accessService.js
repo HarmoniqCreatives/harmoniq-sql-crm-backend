@@ -15,8 +15,11 @@ function isProtectedGrantor(role) {
 /**
  * Returns the permission keys held by the authenticated role.
  * Protected Super Admin is treated as holding the full known registry
- * so they can grant keys such as `leads.bulk` even if a stale role row
- * omitted newer keys from its JSON array.
+ * so they can grant any catalog key (e.g. `leads.bulk`) even if a stale
+ * role row omitted newer keys from its JSON array.
+ *
+ * Feature access for Super Admin does **not** depend on this list —
+ * use `hasPermission`, which bypasses the catalog entirely for grantors.
  *
  * @param {{ role?: { permissions?: string[], isProtected?: boolean, key?: string } }} auth
  * @returns {string[]}
@@ -35,18 +38,29 @@ function authPermissions(auth) {
 }
 
 /**
- * Checks whether the auth context includes a permission key.
+ * Checks whether the auth context may use a feature permission key.
  *
- * Frontend checks are UX only; this helper backs server-side enforcement.
- * Protected Super Admin passes every known permission key.
+ * **Permanent FILOS rule:** protected Super Admin (`isProtected` or
+ * `role.key === super_admin`) passes every current and future feature
+ * permission — including keys not yet in the permission catalog.
+ * New modules must call this helper (or `requirePermission`, which uses it)
+ * and must never require manual Super Admin role-permission seeding.
+ *
+ * Does **not** bypass authentication, account/company status, or tenant
+ * isolation — only feature permission gates.
+ *
+ * Frontend `hasPermission` mirrors this for UX only; server remains authoritative.
  *
  * @param {object} auth
  * @param {string} permissionKey
  * @returns {boolean}
  */
 function hasPermission(auth, permissionKey) {
+  if (!permissionKey) {
+    return false
+  }
   if (isProtectedGrantor(auth && auth.role)) {
-    return isKnownPermission(permissionKey) || authPermissions(auth).includes(permissionKey)
+    return true
   }
   return authPermissions(auth).includes(permissionKey)
 }

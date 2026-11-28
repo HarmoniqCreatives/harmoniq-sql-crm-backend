@@ -19,6 +19,8 @@ const { metaRouter } = require('./modules/meta/metaRoutes')
 const { metaWebhookRouter } = require('./modules/meta/metaWebhookRoutes')
 const { whatsappRouter } = require('./modules/whatsapp/whatsappRoutes')
 const { whatsappWebhookRouter } = require('./modules/whatsapp/whatsappWebhookRoutes')
+const { recycleBinRouter } = require('./modules/recycleBin/recycleBinRoutes')
+const { notificationRouter } = require('./modules/notifications/notificationRoutes')
 const { publicRouter } = require('./routes/publicRoutes')
 const { warnMailProviderAtStartup } = require('./services/mailService')
 const { startLeadWorker, stopLeadWorker } = require('./services/metaLeadService')
@@ -34,6 +36,14 @@ const {
   startWhatsAppOutboxWorker,
   stopWhatsAppOutboxWorker,
 } = require('./services/whatsappOutboxService')
+const {
+  startNotificationPushWorker,
+  stopNotificationPushWorker,
+} = require('./services/notificationPushService')
+const {
+  startFollowUpReminderWorker,
+  stopFollowUpReminderWorker,
+} = require('./services/followUpReminderService')
 const { assertMetaEncryptionKey } = require('./utils/metaSecrets')
 const { assertMetaAutoSyncConfig } = require('./config/metaAutoSync')
 
@@ -82,14 +92,16 @@ app.use('/api/company', companyRouter)
 app.use('/api/leads', leadRouter)
 app.use('/api/meta', metaRouter)
 app.use('/api/whatsapp', whatsappRouter)
+app.use('/api/recycle-bin', recycleBinRouter)
+app.use('/api/notifications', notificationRouter)
 
 app.get('/api', (req, res) => {
   res.status(200).json({
     data: {
       product: 'Harmoniq Creative CRM',
-      phase: 'whatsapp-webhooks',
+      phase: 'notifications',
       orm: 'sequelize',
-      message: 'Auth, Users, Roles, Catalog, Company, Leads, Meta and WhatsApp Integration APIs are available.',
+      message: 'Auth, Users, Roles, Catalog, Company, Leads, Meta, WhatsApp and Notifications APIs are available.',
     },
   })
 })
@@ -97,36 +109,101 @@ app.get('/api', (req, res) => {
 app.use(notFoundHandler)
 app.use(errorHandler)
 
+/** @type {import('http').Server | null} */
+let httpServer = null
+let shuttingDown = false
+
+function stopAllWorkers() {
+  stopLeadWorker()
+  stopMetaAutoSyncScheduler()
+  stopEmailReportWorker()
+  stopWhatsAppOutboxWorker()
+  stopNotificationPushWorker()
+  stopFollowUpReminderWorker()
+}
+
+/**
+ * Graceful shutdown for SIGINT / SIGTERM.
+ * Stops workers, closes HTTP server, then the DB pool.
+ */
+async function gracefulShutdown(signal) {
+  if (shuttingDown) return
+  shuttingDown = true
+  console.log(`[shutdown] received ${signal}`)
+  stopAllWorkers()
+  const forceTimer = setTimeout(() => {
+    console.error('[shutdown] timed out; forcing exit')
+    process.exit(1)
+  }, 15_000)
+  if (typeof forceTimer.unref === 'function') forceTimer.unref()
+
+  try {
+    if (httpServer) {
+      await new Promise((resolve) => {
+        httpServer.close(() => resolve())
+      })
+    }
+  } catch (error) {
+    console.error(`[shutdown] HTTP close error: ${error.message}`)
+  }
+
+  try {
+    await closeDatabase()
+  } catch (error) {
+    console.error(`[shutdown] DB close error: ${error.message}`)
+  }
+
+  process.exit(0)
+}
+
 async function start() {
+  let dbOk = false
   try {
     await assertDatabaseConnection()
+    dbOk = true
     console.log('Sequelize connected to MySQL.')
   } catch (error) {
     console.error(`Sequelize could not connect to MySQL: ${error.message}`)
     console.error('Install and start native MySQL Server, then run: npm run db:migrate')
+    if (env.nodeEnv === 'production' || env.dbEnv === 'production') {
+      console.error('[startup] Refusing to listen in production without a database connection.')
+      process.exit(1)
+    }
   }
 
-  startLeadWorker()
-  startMetaAutoSyncScheduler()
-  startEmailReportWorker()
-  startWhatsAppOutboxWorker()
+  if (dbOk) {
+    startLeadWorker()
+    startMetaAutoSyncScheduler()
+    startEmailReportWorker()
+    startWhatsAppOutboxWorker()
+    startNotificationPushWorker()
+    startFollowUpReminderWorker()
+  } else {
+    console.error('[startup] Skipping background workers until MySQL is available.')
+  }
 
-  app.listen(env.port, () => {
+  httpServer = app.listen(env.port, () => {
     console.log(`Harmoniq Creative CRM API listening on port ${env.port}`)
   })
+  return httpServer
 }
 
 if (require.main === module) {
   start()
 }
 
-process.on('SIGINT', async () => {
-  stopLeadWorker()
-  stopMetaAutoSyncScheduler()
-  stopEmailReportWorker()
-  stopWhatsAppOutboxWorker()
-  await closeDatabase()
-  process.exit(0)
+process.on('SIGINT', () => {
+  gracefulShutdown('SIGINT').catch((error) => {
+    console.error(error)
+    process.exit(1)
+  })
 })
 
-module.exports = { app, start }
+process.on('SIGTERM', () => {
+  gracefulShutdown('SIGTERM').catch((error) => {
+    console.error(error)
+    process.exit(1)
+  })
+})
+
+module.exports = { app, start, gracefulShutdown }

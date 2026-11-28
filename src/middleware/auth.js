@@ -1,4 +1,5 @@
 const { getModels } = require('../models')
+const { hasPermission } = require('../services/accessService')
 const { assertSessionActive, verifyAccessToken } = require('../services/tokenService')
 const { companyStatuses, userStatuses } = require('../utils/enums')
 const { AppError, errors } = require('../utils/errors')
@@ -64,8 +65,12 @@ const requireAuth = asyncHandler(async (req, res, next) => {
 })
 
 /**
- * Requires that `req.auth.role.permissions` contains the given key.
- * Protected Super Admin roles pass every permission check (legacy Faloniq parity).
+ * Requires that the authenticated role may use the given feature permission.
+ *
+ * Permanent FILOS policy: protected Super Admin passes every current and
+ * future permission key via centralized `hasPermission` — no catalog seeding
+ * and no per-route Super Admin special cases.
+ * Authentication and tenant isolation remain enforced by `requireAuth`.
  *
  * @param {string} permission e.g. `users.edit`
  * @returns {import('express').RequestHandler}
@@ -75,12 +80,7 @@ function requirePermission(permission) {
     if (!req.auth || !req.auth.role) {
       throw new AppError(errors.unauthorized, 401)
     }
-    if (req.auth.role.isProtected) {
-      next()
-      return
-    }
-    const permissions = req.auth.role.permissions || []
-    if (!permissions.includes(permission)) {
+    if (!hasPermission(req.auth, permission)) {
       throw new AppError(errors.forbidden, 403)
     }
     next()
@@ -89,7 +89,7 @@ function requirePermission(permission) {
 
 /**
  * Requires at least one of the listed permissions (useful for shared list endpoints).
- * Protected Super Admin roles pass every permission check (legacy Faloniq parity).
+ * Uses the same Super Admin bypass as `requirePermission` / `hasPermission`.
  *
  * @param {string[]} permissionList
  * @returns {import('express').RequestHandler}
@@ -99,12 +99,8 @@ function requireAnyPermission(permissionList) {
     if (!req.auth || !req.auth.role) {
       throw new AppError(errors.unauthorized, 401)
     }
-    if (req.auth.role.isProtected) {
-      next()
-      return
-    }
-    const permissions = req.auth.role.permissions || []
-    const allowed = permissionList.some((key) => permissions.includes(key))
+    const keys = Array.isArray(permissionList) ? permissionList : []
+    const allowed = keys.some((key) => hasPermission(req.auth, key))
     if (!allowed) {
       throw new AppError(errors.forbidden, 403)
     }

@@ -1,8 +1,13 @@
 const { getModels } = require('../models')
-const { currencies, timezones } = require('../utils/enums')
+const {
+  currencies,
+  followUpReminderMinutesOptions,
+  timezones,
+} = require('../utils/enums')
 const { AppError, errors } = require('../utils/errors')
 const { readText } = require('../utils/helpers')
 const { presentEmailReports } = require('./emailReportService')
+const { normalizeLeadMinutes } = require('./followUpReminderService')
 
 function mergeEnabledCurrencies(companyEnabled) {
   const known = Object.values(currencies)
@@ -35,6 +40,8 @@ function presentCompany(company, emailReports) {
     baseCurrency: company.baseCurrency,
     enabledCurrencies: enabled,
     emailReportsEnabled: Boolean(company.emailReportsEnabled),
+    followUpReminderMinutes: normalizeLeadMinutes(company.followUpReminderMinutes),
+    followUpReminderMinutesOptions: [...followUpReminderMinutesOptions],
   }
   if (emailReports) {
     payload.emailReports = emailReports
@@ -57,7 +64,8 @@ async function getCompany(auth) {
 }
 
 /**
- * Updates timezone and base currency. Base currency must be in enabledCurrencies.
+ * Updates timezone, base currency, and optional follow-up reminder lead time.
+ * Base currency must be in enabledCurrencies.
  *
  * @param {object} auth
  * @param {object} body
@@ -86,6 +94,15 @@ async function updateCompany(auth, body) {
   company.timezone = timezone
   company.baseCurrency = baseCurrency
   company.enabledCurrencies = enabled
+
+  if (body && Object.prototype.hasOwnProperty.call(body, 'followUpReminderMinutes')) {
+    const minutes = Number(body.followUpReminderMinutes)
+    if (!followUpReminderMinutesOptions.includes(minutes)) {
+      throw new AppError(errors.followUpReminderMinutesInvalid, 400)
+    }
+    company.followUpReminderMinutes = minutes
+  }
+
   await company.save()
   const emailReports = await presentEmailReports(company)
   return presentCompany(company, emailReports)

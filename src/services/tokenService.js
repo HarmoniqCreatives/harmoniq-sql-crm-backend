@@ -4,6 +4,7 @@ const { readEnv } = require('../config/env')
 const { security } = require('../config/security')
 const { getModels } = require('../models')
 const { AppError, errors } = require('../utils/errors')
+const { userStatuses, companyStatuses } = require('../utils/enums')
 const {
   addDays,
   createSecretToken,
@@ -97,8 +98,16 @@ async function rotateRefreshToken(refreshToken, meta = {}) {
   if (existing.expiresAt.getTime() < Date.now()) {
     throw new AppError(errors.refreshInvalid, 401)
   }
+  const { Company } = getModels()
   const user = await User.findByPk(existing.userId)
   if (!user || user.companyId !== existing.companyId) {
+    throw new AppError(errors.refreshInvalid, 401)
+  }
+  if (user.status !== userStatuses.active || !user.emailVerified) {
+    throw new AppError(errors.refreshInvalid, 401)
+  }
+  const company = await Company.findByPk(user.companyId)
+  if (!company || company.status !== companyStatuses.active) {
     throw new AppError(errors.refreshInvalid, 401)
   }
   const next = await createSession(user, {

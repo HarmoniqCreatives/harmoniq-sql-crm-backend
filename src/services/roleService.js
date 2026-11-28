@@ -1,7 +1,7 @@
 const { v4: uuidv4 } = require('uuid')
 const { getModels } = require('../models')
 const { isKnownPermission } = require('../config/permissions')
-const { roleKeys, roleScopes } = require('../utils/enums')
+const { permissionKeys, roleKeys, roleScopes } = require('../utils/enums')
 const { AppError, errors } = require('../utils/errors')
 const { messages } = require('../utils/messages')
 const {
@@ -12,9 +12,11 @@ const {
 const { security } = require('../config/security')
 const {
   assertCanAssignPermissions,
+  hasPermission,
   presentPermissionMatrix,
   roleRank,
 } = require('./accessService')
+const { deriveIsDeleted, markRestored, markSoftDeleted } = require('../utils/softDelete')
 
 /**
  * Role CRUD with system-role protection and permission-escalation guards.
@@ -38,6 +40,9 @@ function presentRole(role, extras = {}) {
     userCount: extras.userCount || 0,
     createdAt: role.createdAt,
     updatedAt: role.updatedAt,
+    deletedAt: role.deletedAt || null,
+    is_deleted: deriveIsDeleted(role),
+    isDeleted: deriveIsDeleted(role),
   }
 }
 
@@ -122,11 +127,19 @@ async function createRole(auth, body) {
   }
   assertCanAssignPermissions(auth, permissions)
 
+  const roleKey = keyRaw.slice(0, 64)
+  const deletedWithKey = await Role.scope('onlyDeleted').findOne({
+    where: { companyId: auth.companyId, key: roleKey },
+  })
+  if (deletedWithKey) {
+    throw new AppError(errors.roleKeyDeletedExists, 409)
+  }
+
   try {
     const role = await Role.create({
       id: uuidv4(),
       companyId: auth.companyId,
-      key: keyRaw.slice(0, 64),
+      key: roleKey,
       name,
       description: description.slice(0, 500),
       permissions,
@@ -227,8 +240,52 @@ async function deleteRole(auth, roleId) {
   if (userCount > 0) {
     throw new AppError(errors.roleInUse, 409)
   }
-  await role.destroy()
+  await markSoftDeleted(role, { userId: auth.userId })
   return { message: messages.roleDeleted }
+}
+
+/**
+ * @param {object} auth
+ */
+async function listDeletedRoles(auth) {
+  if (!hasPermission(auth, permissionKeys.recycleBinView)) {
+    throw new AppError(errors.forbidden, 403)
+  }
+  const { Role } = getModels()
+  const rows = await Role.unscoped().findAll({
+    where: { companyId: auth.companyId, isDeleted: true },
+    order: [['deletedAt', 'DESC']],
+  })
+  return rows.map((role) => presentRole(role))
+}
+
+/**
+ * @param {object} auth
+ * @param {string} roleId
+ */
+async function restoreRole(auth, roleId) {
+  if (!hasPermission(auth, permissionKeys.recycleBinRestore)) {
+    throw new AppError(errors.forbidden, 403)
+  }
+  const { Role } = getModels()
+  const role = await Role.unscoped().findOne({
+    where: { id: roleId, companyId: auth.companyId, isDeleted: true },
+  })
+  if (!role) {
+    throw new AppError(errors.roleNotFound, 404)
+  }
+  // Unique (companyId, key) is held by this soft-deleted row — restore cannot collide with another active row.
+  const conflict = await Role.findOne({
+    where: { companyId: auth.companyId, key: role.key, isDeleted: false },
+  })
+  if (conflict && conflict.id !== role.id) {
+    throw new AppError(
+      `Cannot restore role "${role.key}": an active role already uses this key.`,
+      409,
+    )
+  }
+  await markRestored(role)
+  return { message: messages.roleRestored, role: presentRole(role) }
 }
 
 module.exports = {
@@ -237,5 +294,7 @@ module.exports = {
   createRole,
   updateRole,
   deleteRole,
+  listDeletedRoles,
+  restoreRole,
   presentRole,
 }

@@ -6,6 +6,15 @@
  * Creates disposable tenants via /api/auth/register (same pattern as auth.test.js).
  */
 
+
+const {
+  isolatedTestDbConfigured,
+  applyIsolatedTestDbEnv,
+  assertIsolatedTestDbOrThrow,
+} = require('./helpers/isolatedTestDb')
+assertIsolatedTestDbOrThrow()
+applyIsolatedTestDbEnv()
+
 const assert = require('node:assert/strict')
 const { before, test } = require('node:test')
 const { v4: uuidv4 } = require('uuid')

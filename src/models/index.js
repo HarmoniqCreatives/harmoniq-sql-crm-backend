@@ -15,6 +15,7 @@ const { defineLeadNote } = require('./LeadNote')
 const { defineLeadFeedback } = require('./LeadFeedback')
 const { defineLeadTransfer } = require('./LeadTransfer')
 const { defineLeadActivity } = require('./LeadActivity')
+const { defineLeadImportSession } = require('./LeadImportSession')
 const { defineMetaAppProfile } = require('./MetaAppProfile')
 const { defineMetaConnection } = require('./MetaConnection')
 const { defineMetaPage } = require('./MetaPage')
@@ -32,6 +33,9 @@ const { defineWhatsAppMessageLog } = require('./WhatsAppMessageLog')
 const { defineWhatsAppOutbox } = require('./WhatsAppOutbox')
 const { defineWhatsAppWebhookEvent } = require('./WhatsAppWebhookEvent')
 const { defineWhatsAppAuditLog } = require('./WhatsAppAuditLog')
+const { defineNotification } = require('./Notification')
+const { defineUserDeviceToken } = require('./UserDeviceToken')
+const { defineNotificationDelivery } = require('./NotificationDelivery')
 
 let models
 
@@ -56,6 +60,7 @@ function getModels() {
   const LeadFeedback = defineLeadFeedback(sequelize)
   const LeadTransfer = defineLeadTransfer(sequelize)
   const LeadActivity = defineLeadActivity(sequelize)
+  const LeadImportSession = defineLeadImportSession(sequelize)
   const MetaAppProfile = defineMetaAppProfile(sequelize)
   const MetaConnection = defineMetaConnection(sequelize)
   const MetaPage = defineMetaPage(sequelize)
@@ -73,6 +78,9 @@ function getModels() {
   const WhatsAppOutbox = defineWhatsAppOutbox(sequelize)
   const WhatsAppWebhookEvent = defineWhatsAppWebhookEvent(sequelize)
   const WhatsAppAuditLog = defineWhatsAppAuditLog(sequelize)
+  const Notification = defineNotification(sequelize)
+  const UserDeviceToken = defineUserDeviceToken(sequelize)
+  const NotificationDelivery = defineNotificationDelivery(sequelize)
 
   Company.hasMany(Role, { foreignKey: 'companyId' })
   Company.hasMany(User, { foreignKey: 'companyId' })
@@ -82,6 +90,7 @@ function getModels() {
   Company.hasMany(Team, { foreignKey: 'companyId' })
   Company.hasMany(Invitation, { foreignKey: 'companyId' })
   Company.hasMany(Lead, { foreignKey: 'companyId' })
+  Company.hasMany(LeadImportSession, { foreignKey: 'companyId' })
   Company.hasMany(Counter, { foreignKey: 'companyId' })
   Company.hasMany(MetaAppProfile, { foreignKey: 'companyId' })
   Company.hasMany(MetaConnection, { foreignKey: 'companyId' })
@@ -100,6 +109,8 @@ function getModels() {
   Company.hasMany(WhatsAppOutbox, { foreignKey: 'companyId' })
   Company.hasMany(WhatsAppWebhookEvent, { foreignKey: 'companyId' })
   Company.hasMany(WhatsAppAuditLog, { foreignKey: 'companyId' })
+  Company.hasMany(Notification, { foreignKey: 'companyId' })
+  Company.hasMany(UserDeviceToken, { foreignKey: 'companyId' })
 
   Role.belongsTo(Company, { foreignKey: 'companyId' })
   Role.hasMany(User, { foreignKey: 'roleId' })
@@ -111,6 +122,8 @@ function getModels() {
   User.belongsTo(Team, { foreignKey: 'teamId' })
   User.hasMany(Session, { foreignKey: 'userId' })
   User.hasMany(Invitation, { foreignKey: 'invitedBy', as: 'sentInvitations' })
+  User.hasMany(Notification, { foreignKey: 'userId' })
+  User.hasMany(UserDeviceToken, { foreignKey: 'userId' })
 
   Session.belongsTo(User, { foreignKey: 'userId' })
   Session.belongsTo(Company, { foreignKey: 'companyId' })
@@ -142,6 +155,11 @@ function getModels() {
   Lead.hasMany(LeadFeedback, { foreignKey: 'leadId', as: 'feedbacks' })
   Lead.hasMany(LeadTransfer, { foreignKey: 'leadId', as: 'transfers' })
   Lead.hasMany(LeadActivity, { foreignKey: 'leadId', as: 'activities' })
+  Lead.belongsTo(LeadImportSession, { foreignKey: 'importSessionId', as: 'importSession' })
+
+  LeadImportSession.belongsTo(Company, { foreignKey: 'companyId' })
+  LeadImportSession.belongsTo(User, { foreignKey: 'userId', as: 'initiator' })
+  LeadImportSession.hasMany(Lead, { foreignKey: 'importSessionId', as: 'importedLeads' })
 
   LeadTag.belongsTo(Lead, { foreignKey: 'leadId' })
   LeadTag.belongsTo(CatalogItem, { foreignKey: 'tagId', as: 'tag' })
@@ -212,6 +230,17 @@ function getModels() {
   WhatsAppAuditLog.belongsTo(Company, { foreignKey: 'companyId' })
   WhatsAppAuditLog.belongsTo(User, { foreignKey: 'actorUserId', as: 'actor' })
 
+  Notification.belongsTo(Company, { foreignKey: 'companyId' })
+  Notification.belongsTo(User, { foreignKey: 'userId' })
+  Notification.hasMany(NotificationDelivery, { foreignKey: 'notificationId', as: 'deliveries' })
+
+  UserDeviceToken.belongsTo(Company, { foreignKey: 'companyId' })
+  UserDeviceToken.belongsTo(User, { foreignKey: 'userId' })
+  UserDeviceToken.hasMany(NotificationDelivery, { foreignKey: 'deviceTokenId', as: 'deliveries' })
+
+  NotificationDelivery.belongsTo(Notification, { foreignKey: 'notificationId', as: 'notification' })
+  NotificationDelivery.belongsTo(UserDeviceToken, { foreignKey: 'deviceTokenId', as: 'deviceToken' })
+
   models = {
     sequelize,
     Sequelize: require('sequelize').Sequelize,
@@ -231,6 +260,7 @@ function getModels() {
     LeadFeedback,
     LeadTransfer,
     LeadActivity,
+    LeadImportSession,
     MetaAppProfile,
     MetaConnection,
     MetaPage,
@@ -248,6 +278,9 @@ function getModels() {
     WhatsAppOutbox,
     WhatsAppWebhookEvent,
     WhatsAppAuditLog,
+    Notification,
+    UserDeviceToken,
+    NotificationDelivery,
   }
   return models
 }

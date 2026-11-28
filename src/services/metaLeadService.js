@@ -420,9 +420,20 @@ async function processIngestion(ingestion, graph) {
   const client = graph || graphClient
   const { MetaPage, CatalogItem, Company } = getModels()
   const page = await MetaPage.findOne({
-    where: { id: ingestion.metaPageId, pageId: ingestion.pageId },
+    where: {
+      id: ingestion.metaPageId,
+      pageId: ingestion.pageId,
+      companyId: ingestion.companyId,
+    },
   })
   if (!page) {
+    ingestion.status = metaWebhookIngestionStatuses.failed
+    ingestion.lastError = errors.metaPageNotFound
+    ingestion.retryCount = security.metaLeadRetryLimit
+    await ingestion.save()
+    return ingestion
+  }
+  if (page.companyId !== ingestion.companyId) {
     ingestion.status = metaWebhookIngestionStatuses.failed
     ingestion.lastError = errors.metaPageNotFound
     ingestion.retryCount = security.metaLeadRetryLimit

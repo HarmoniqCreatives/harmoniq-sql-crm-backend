@@ -1,3 +1,11 @@
+const {
+  isolatedTestDbConfigured,
+  applyIsolatedTestDbEnv,
+  assertIsolatedTestDbOrThrow,
+} = require('./helpers/isolatedTestDb')
+assertIsolatedTestDbOrThrow()
+applyIsolatedTestDbEnv()
+
 const assert = require('node:assert/strict')
 const { before, test } = require('node:test')
 const { v4: uuidv4 } = require('uuid')

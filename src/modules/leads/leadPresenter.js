@@ -1,5 +1,6 @@
 const { isOverdue } = require('../../services/leadOverdue')
 const { messages } = require('../../utils/messages')
+const { deriveIsDeleted } = require('../../utils/softDelete')
 
 /**
  * Builds the public lead response shape used by list and detail.
@@ -40,8 +41,20 @@ function presentLead(lead, itemMap, userMap, timeZone) {
     label: `#${lead.number}`,
     name: lead.name,
     phone: lead.phone,
+    alternatePhone: lead.alternatePhone || null,
     email: lead.email,
     source: lead.source,
+    subSource: lead.subSource || null,
+    agencyName: lead.agencyName || null,
+    statusReason: lead.statusReason || null,
+    receivedOn: lead.receivedOn || null,
+    entryMethod: lead.entryMethod || 'manual',
+    /** Product-facing alias of entryMethod (same stored value). */
+    addedVia: lead.entryMethod || 'manual',
+    importSessionId: lead.importSessionId || null,
+    /** Product-facing alias of importSessionId. */
+    importBatchId: lead.importSessionId || null,
+    importedAt: lead.importedAt || null,
     status: statusView,
     tags,
     primaryAgent: primary ? { id: primary.id, name: primary.name } : null,
@@ -78,6 +91,11 @@ function presentLead(lead, itemMap, userMap, timeZone) {
     activities,
     history,
     createdAt: lead.createdAt,
+    deletedAt: lead.deletedAt || null,
+    deletedBy: lead.deletedBy || null,
+    /** Derived soft-delete flag (Leads store deletion via paranoid deletedAt). */
+    is_deleted: deriveIsDeleted(lead),
+    isDeleted: deriveIsDeleted(lead),
   }
 }
 
@@ -152,7 +170,8 @@ function presentNotes(lead, userMap) {
   return (lead.notes || []).map((item) => ({
     text: item.text,
     createdBy: item.createdBy,
-    createdByName: personName(userMap, item.createdBy),
+    createdByName: item.authorDisplayName || personName(userMap, item.createdBy),
+    authorDisplayName: item.authorDisplayName || null,
     createdAt: item.createdAt,
   }))
 }

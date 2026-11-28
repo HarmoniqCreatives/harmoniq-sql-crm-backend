@@ -37,6 +37,15 @@ function defineCompany(sequelize) {
       allowNull: false,
       defaultValue: false,
     },
+    /**
+     * Minutes before nextFollowUpAt to send the in-app/push reminder.
+     * Allowlist: 5, 10, 15, 25, 30, 60 (validated in companyService).
+     */
+    followUpReminderMinutes: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 5,
+    },
   }, {
     tableName: 'companies',
   })

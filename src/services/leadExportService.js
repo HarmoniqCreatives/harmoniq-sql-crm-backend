@@ -57,6 +57,9 @@ function toCsv(rows) {
     messages.csvPageName,
     messages.csvMetaCreatedAt,
     messages.csvCreatedAt,
+    messages.csvAddedVia,
+    messages.csvImportedAt,
+    messages.csvImportBatchId,
   ]
   const lines = [headers.map(csvCell).join(',')]
   for (const row of rows) {
@@ -84,6 +87,9 @@ function toCsv(rows) {
       row.facebookPageName || messages.leadPageNotAvailable || 'Not Available',
       row.metaCreatedAt ? new Date(row.metaCreatedAt).toISOString() : '',
       row.createdAt ? new Date(row.createdAt).toISOString() : '',
+      row.entryMethod || row.addedVia || '',
+      row.importedAt ? new Date(row.importedAt).toISOString() : '',
+      row.importSessionId || row.importBatchId || '',
     ]
     lines.push(cells.map(csvCell).join(','))
   }
@@ -140,6 +146,9 @@ async function toXlsx(rows) {
     { header: messages.csvPageName, key: 'page', width: 22 },
     { header: messages.csvMetaCreatedAt, key: 'metaCreatedAt', width: 24 },
     { header: messages.csvCreatedAt, key: 'createdAt', width: 24 },
+    { header: messages.csvAddedVia, key: 'addedVia', width: 14 },
+    { header: messages.csvImportedAt, key: 'importedAt', width: 24 },
+    { header: messages.csvImportBatchId, key: 'importBatchId', width: 38 },
   ]
   for (const row of rows) {
     const excelRow = sheet.addRow({
@@ -166,8 +175,11 @@ async function toXlsx(rows) {
       page: row.facebookPageName || messages.leadPageNotAvailable || 'Not Available',
       metaCreatedAt: toLeadCreatedExcelDate(row.metaCreatedAt),
       createdAt: toLeadCreatedExcelDate(row.createdAt),
+      addedVia: row.entryMethod || row.addedVia || '',
+      importedAt: toLeadCreatedExcelDate(row.importedAt),
+      importBatchId: row.importSessionId || row.importBatchId || '',
     })
-    for (const key of ['metaCreatedAt', 'createdAt']) {
+    for (const key of ['metaCreatedAt', 'createdAt', 'importedAt']) {
       const cell = excelRow.getCell(key)
       if (cell.value instanceof Date) {
         cell.numFmt = 'yyyy-mm-dd hh:mm:ss'

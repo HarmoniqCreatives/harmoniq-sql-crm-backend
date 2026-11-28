@@ -18,9 +18,24 @@ test('protected Super Admin is a grantor even with empty permissions array', () 
   }
   assert.equal(isProtectedGrantor(auth.role), true)
   assert.equal(hasPermission(auth, permissionKeys.leadsBulk), true)
+  assert.equal(hasPermission(auth, 'future.feature.not_in_catalog'), true)
   assert.doesNotThrow(() => {
     assertCanAssignPermissions(auth, [permissionKeys.leadsBulk, permissionKeys.leadsBulkAssign])
   })
+})
+
+test('Super Admin still cannot assign unknown keys into other roles', () => {
+  const auth = {
+    role: {
+      key: roleKeys.superAdmin,
+      isProtected: true,
+      permissions: [],
+    },
+  }
+  assert.throws(
+    () => assertCanAssignPermissions(auth, ['future.feature.not_in_catalog']),
+    (error) => error instanceof AppError && error.message === errors.rolePermissionsInvalid,
+  )
 })
 
 test('Manager without leads.bulk cannot be granted that key by a non-holder', () => {

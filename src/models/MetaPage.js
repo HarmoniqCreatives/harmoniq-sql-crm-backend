@@ -26,8 +26,18 @@ function defineMetaPage(sequelize) {
     lastFetchedAt: { type: DataTypes.DATE, allowNull: true },
     lastSyncAt: { type: DataTypes.DATE, allowNull: true },
     lastError: { type: DataTypes.STRING(500), allowNull: false, defaultValue: '' },
+    isDeleted: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    deletedAt: { type: DataTypes.DATE, allowNull: true },
+    deletedBy: { type: DataTypes.CHAR(36), allowNull: true },
   }, {
     tableName: 'meta_pages',
+    defaultScope: {
+      where: { isDeleted: false },
+    },
+    scopes: {
+      withDeleted: { where: {} },
+      onlyDeleted: { where: { isDeleted: true } },
+    },
   })
 }
 

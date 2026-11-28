@@ -162,6 +162,24 @@ const errors = {
   bulkIdsLimit: 'Too many leads selected for one bulk action.',
   bulkPartialFailure: 'Some leads could not be updated.',
   reportFormatInvalid: 'Choose csv or xlsx export format.',
+  leadImportFileRequired: 'Upload an Excel (.xlsx) file.',
+  leadImportFileTypeInvalid: 'Only .xlsx Excel files are supported.',
+  leadImportFileTooLarge: 'The Excel file exceeds the 10 MB limit.',
+  leadImportFileInvalid: 'The uploaded file is not a valid Excel workbook.',
+  leadImportRowLimit: 'The Excel file exceeds the 5,000 row limit.',
+  leadImportSessionNotFound: 'That import session was not found.',
+  leadImportSessionNotReady: 'Validate the import session before confirming.',
+  leadImportSessionCompleted: 'That import session was already completed.',
+  leadImportMappingRequired: 'Provide a column mapping for the Excel headers.',
+  leadImportDecisionsRequired: 'Resolve every duplicate row before confirming.',
+  leadImportDecisionInvalid: 'One or more duplicate decisions are invalid.',
+  leadImportAmbiguousAgent: 'Assigned agent name matches more than one user.',
+  leadImportAmbiguousStatus: 'Status name matches more than one status.',
+  leadImportAmbiguousTag: 'Tag name matches more than one tag.',
+  leadImportPhoneInvalid: 'Contact numbers must use international E.164 format (start with +).',
+  leadImportPermissionCreate: 'You do not have permission to create leads during import.',
+  leadImportPermissionEdit: 'You do not have permission to update existing leads during import.',
+  leadImportPermissionAssign: 'You do not have permission to assign agents during import.',
   whatsappConfigNotFound: 'WhatsApp is not connected for this company.',
   whatsappConfigInvalid: 'WhatsApp configuration is invalid.',
   whatsappLanguageInvalid: 'Enter a valid default language code.',
@@ -212,6 +230,24 @@ const errors = {
   whatsappBindingNotFound: 'WhatsApp workflow binding was not found.',
   whatsappWorkflowSampleTemplateForbidden:
     'Do not bind the Meta hello_world sample template to W1/W2. Use an approved lead-assignment template instead.',
+  notificationCategoryInvalid: 'Choose a supported notification category.',
+  notificationRecipientInvalid: 'Notification recipient is invalid for this company.',
+  notificationIdempotencyRequired: 'An idempotency key is required for notifications.',
+  notificationTitleRequired: 'Notification title is required.',
+  notificationBodyRequired: 'Notification body is required.',
+  notificationNotFound: 'Notification not found.',
+  deviceTokenRequired: 'A push device token is required.',
+  devicePlatformInvalid: 'Choose a supported device platform (android, ios, or web).',
+  deviceTokenTooLong: 'Push device token is too long.',
+  deviceIdentifierRequired: 'Provide a device token or deviceId to deactivate.',
+  roleKeyDeletedExists:
+    'A deleted role with this key already exists. Restore it from Recycle Bin instead of creating a new one.',
+  catalogKeyDeletedExists:
+    'A deleted catalog item with this name already exists. Restore it from Recycle Bin instead of creating a new one.',
+  metaProfileLabelDeletedExists:
+    'A deleted Meta profile with this label already exists. Restore it from Recycle Bin instead of creating a new one.',
+  followUpReminderMinutesInvalid:
+    'Choose a follow-up reminder time of 5, 10, 15, 25, 30, or 60 minutes.',
 }
 
 module.exports = { AppError, errors }

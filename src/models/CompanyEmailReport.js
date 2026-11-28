@@ -43,8 +43,18 @@ function defineCompanyEmailReport(sequelize) {
         },
       },
     },
+    isDeleted: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    deletedAt: { type: DataTypes.DATE, allowNull: true },
+    deletedBy: { type: DataTypes.CHAR(36), allowNull: true },
   }, {
     tableName: 'company_email_reports',
+    defaultScope: {
+      where: { isDeleted: false },
+    },
+    scopes: {
+      withDeleted: { where: {} },
+      onlyDeleted: { where: { isDeleted: true } },
+    },
   })
 }
 

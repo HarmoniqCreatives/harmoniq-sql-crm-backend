@@ -1,5 +1,11 @@
 const { DataTypes } = require('sequelize')
-const { leadPurposes, leadSources, propertyTypes, readinessValues } = require('../utils/enums')
+const {
+  leadEntryMethods,
+  leadPurposes,
+  leadSources,
+  propertyTypes,
+  readinessValues,
+} = require('../utils/enums')
 
 /**
  * Tenant-scoped lead. Soft-deleted via `deletedAt` (paranoid).
@@ -14,8 +20,21 @@ function defineLead(sequelize) {
     number: { type: DataTypes.INTEGER, allowNull: false },
     name: { type: DataTypes.STRING(120), allowNull: false },
     phone: { type: DataTypes.STRING(32), allowNull: false },
+    alternatePhone: { type: DataTypes.STRING(32), allowNull: true },
     email: { type: DataTypes.STRING(255), allowNull: false, defaultValue: '' },
     source: { type: DataTypes.ENUM(...Object.values(leadSources)), allowNull: false, defaultValue: leadSources.manual },
+    subSource: { type: DataTypes.STRING(120), allowNull: true },
+    agencyName: { type: DataTypes.STRING(200), allowNull: true },
+    statusReason: { type: DataTypes.STRING(300), allowNull: true },
+    receivedOn: { type: DataTypes.DATE, allowNull: true },
+    entryMethod: {
+      type: DataTypes.STRING(32),
+      allowNull: false,
+      defaultValue: leadEntryMethods.manual,
+    },
+    importSessionId: { type: DataTypes.CHAR(36), allowNull: true },
+    /** CRM import/sync time for Meta/Excel origins only; null for manual/unknown. Immutable after create. */
+    importedAt: { type: DataTypes.DATE, allowNull: true },
     metaLeadId: { type: DataTypes.STRING(128), allowNull: true },
     /** Original Meta/Facebook lead generation time (`created_time`). Null for manual leads. */
     metaCreatedAt: { type: DataTypes.DATE, allowNull: true },

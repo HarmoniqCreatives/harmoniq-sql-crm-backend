@@ -29,8 +29,18 @@ function defineMetaConnection(sequelize) {
     connectedBy: { type: DataTypes.CHAR(36), allowNull: false },
     lastVerifiedAt: { type: DataTypes.DATE, allowNull: true },
     disconnectedAt: { type: DataTypes.DATE, allowNull: true },
+    isDeleted: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    deletedAt: { type: DataTypes.DATE, allowNull: true },
+    deletedBy: { type: DataTypes.CHAR(36), allowNull: true },
   }, {
     tableName: 'meta_connections',
+    defaultScope: {
+      where: { isDeleted: false },
+    },
+    scopes: {
+      withDeleted: { where: {} },
+      onlyDeleted: { where: { isDeleted: true } },
+    },
   })
 }
 

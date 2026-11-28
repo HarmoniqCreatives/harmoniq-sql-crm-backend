@@ -19,16 +19,21 @@ const {
   validateLeadScalars,
 } = require('../modules/leads/leadValidators')
 const {
+  leadEntryMethods,
   leadSorts,
   leadSources,
+  permissionKeys,
+  roleKeys,
   roleScopes,
   whatsappWorkflowKeys,
 } = require('../utils/enums')
 const { AppError, errors } = require('../utils/errors')
 const { messages } = require('../utils/messages')
-const { isUuid, readText } = require('../utils/helpers')
+const { isUuid, readText, normalizePhone, isInternationalPhone } = require('../utils/helpers')
+const { hasPermission } = require('./accessService')
 const assignmentNotifications = require('./assignmentNotificationService')
 const whatsappAssignmentNotifications = require('./whatsappAssignmentNotificationService')
+const inAppNotifications = require('./notificationService')
 
 /**
  * Lead CRUD, scope, assignment, notes/feedback/activities — legacy leadService parity.
@@ -43,7 +48,8 @@ const whatsappAssignmentNotifications = require('./whatsappAssignmentNotificatio
  */
 function leadScopeFilter(auth) {
   const filter = { companyId: auth.companyId }
-  if (auth.role?.isProtected) {
+  // Align with hasPermission grantor rule (isProtected OR super_admin key).
+  if (auth.role && (auth.role.isProtected || auth.role.key === roleKeys.superAdmin)) {
     return filter
   }
   if (auth.role?.scope === roleScopes.company) {
@@ -132,6 +138,16 @@ async function buildLeadQuery(auth, query) {
       throw new AppError(errors.leadSourceInvalid, 400)
     }
     filter.source = source
+  }
+
+  // Added Via filter (entryMethod). Accepts product aliases (META / Excel Import) and DB values.
+  const entryMethodRaw = readText(query, 'entryMethod') || readText(query, 'addedVia')
+  if (entryMethodRaw) {
+    const normalized = normalizeEntryMethodFilter(entryMethodRaw)
+    if (!normalized) {
+      throw new AppError('Invalid Added Via filter.', 400)
+    }
+    filter.entryMethod = normalized
   }
 
   const include = [
@@ -318,15 +334,79 @@ async function getLead(auth, leadId) {
 }
 
 /**
+ * Normalize Added Via / entryMethod query values to stored DB enums.
+ * @param {string} raw
+ * @returns {string|null}
+ */
+function normalizeEntryMethodFilter(raw) {
+  const key = String(raw || '').trim().toLowerCase().replace(/\s+/g, '_')
+  const aliases = {
+    manual: leadEntryMethods.manual,
+    excel_import: leadEntryMethods.excelImport,
+    excel: leadEntryMethods.excelImport,
+    excelimport: leadEntryMethods.excelImport,
+    meta_import: leadEntryMethods.metaImport,
+    meta: leadEntryMethods.metaImport,
+    api_import: leadEntryMethods.apiImport,
+    api: leadEntryMethods.apiImport,
+    unknown: leadEntryMethods.unknown,
+  }
+  return aliases[key] || (Object.values(leadEntryMethods).includes(key) ? key : null)
+}
+
+/**
+ * Trusted server-side provenance only. Client body fields are ignored.
+ * @param {object} options
+ * @returns {{ entryMethod: string, importSessionId: string|null, importedAt: Date|null }}
+ */
+function resolveCreateProvenance(options = {}) {
+  const metaImport = options.metaImport === true
+  let entryMethod = options.entryMethod || leadEntryMethods.manual
+  if (metaImport) {
+    entryMethod = leadEntryMethods.metaImport
+  }
+  if (!Object.values(leadEntryMethods).includes(entryMethod)) {
+    entryMethod = leadEntryMethods.manual
+  }
+  const importSessionId = options.importSessionId || null
+  let importedAt = null
+  if (entryMethod === leadEntryMethods.metaImport || entryMethod === leadEntryMethods.excelImport) {
+    if (options.importedAt instanceof Date && !Number.isNaN(options.importedAt.getTime())) {
+      importedAt = options.importedAt
+    } else {
+      importedAt = new Date()
+    }
+  }
+  return { entryMethod, importSessionId, importedAt }
+}
+
+/**
  * @param {object} auth
  * @param {object} body
- * @param {{ metaImport?: boolean }} [options]
+ * @param {{
+ *   metaImport?: boolean,
+ *   entryMethod?: string,
+ *   importSessionId?: string|null,
+ *   importedAt?: Date|null,
+ *   suppressAssignmentNotifications?: boolean,
+ * }} [options]
  *   metaImport: Meta Lead Ads sync path only — softens optional validations and
  *   never treats post-insert presentation/notification failures as create failure.
  * @returns {Promise<{ message: string, lead: object }>}
  */
 async function createLead(auth, body, options = {}) {
+  // Never trust client-supplied origin fields (strip even if present on body).
+  if (body && typeof body === 'object') {
+    delete body.entryMethod
+    delete body.addedVia
+    delete body.importSessionId
+    delete body.importBatchId
+    delete body.importedAt
+  }
   const metaImport = options.metaImport === true
+  const suppressAssignmentNotifications = options.suppressAssignmentNotifications === true
+  const provenance = resolveCreateProvenance(options)
+  const { entryMethod, importSessionId, importedAt } = provenance
   const { sequelize, Lead, LeadTag, LeadFeedback, Company } = getModels()
   const scalars = validateLeadScalars(body, {
     requireCore: true,
@@ -384,6 +464,28 @@ async function createLead(auth, body, options = {}) {
     }
   }
 
+  let alternatePhone = null
+  if (body && Object.prototype.hasOwnProperty.call(body, 'alternatePhone') && body.alternatePhone) {
+    const normalizedAlt = normalizePhone(body.alternatePhone)
+    if (!isInternationalPhone(normalizedAlt)) {
+      if (!metaImport) {
+        throw new AppError(errors.leadImportPhoneInvalid, 400)
+      }
+    } else {
+      alternatePhone = normalizedAlt
+    }
+  }
+  const subSource = body?.subSource ? String(body.subSource).trim().slice(0, 120) : null
+  const agencyName = body?.agencyName ? String(body.agencyName).trim().slice(0, 200) : null
+  const statusReason = body?.statusReason ? String(body.statusReason).trim().slice(0, 300) : null
+  let receivedOn = null
+  if (body && body.receivedOn) {
+    const parsed = body.receivedOn instanceof Date ? body.receivedOn : new Date(body.receivedOn)
+    if (!Number.isNaN(parsed.getTime())) {
+      receivedOn = parsed
+    }
+  }
+
   try {
     const lead = await createLeadWithRetry({
       sequelize,
@@ -414,8 +516,16 @@ async function createLead(auth, body, options = {}) {
       company,
       nextFollowUpAt,
       feedbacks,
+      entryMethod,
+      importSessionId,
+      importedAt,
+      alternatePhone,
+      subSource,
+      agencyName,
+      statusReason,
+      receivedOn,
     })
-    if (lead.primaryAgentId) {
+    if (lead.primaryAgentId && !suppressAssignmentNotifications) {
       let assignedByName = ''
       if (auth.user && auth.user.name) {
         assignedByName = auth.user.name
@@ -459,6 +569,13 @@ async function createLead(auth, body, options = {}) {
       } catch (_error) {
         // Lead already created; WhatsApp W1 must never fail this request.
       }
+      // In-app inbox only — separate from email/WhatsApp; never fail create.
+      await inAppNotifications.safeNotify(inAppNotifications.notifyLeadAssigned, {
+        companyId: auth.companyId,
+        leadId: lead.id,
+        newPrimaryAgentId: lead.primaryAgentId,
+        contactName: lead.name,
+      })
     }
     try {
       const full = await findLeadInScope(auth, lead.id)
@@ -527,6 +644,14 @@ async function createLeadWithRetry(context, attempt = 0) {
     company,
     nextFollowUpAt,
     feedbacks,
+    entryMethod,
+    importSessionId,
+    importedAt,
+    alternatePhone,
+    subSource,
+    agencyName,
+    statusReason,
+    receivedOn,
   } = context
   try {
     return await sequelize.transaction(async (transaction) => {
@@ -537,8 +662,16 @@ async function createLeadWithRetry(context, attempt = 0) {
         number,
         name: scalars.name,
         phone: scalars.phone,
+        alternatePhone: alternatePhone || null,
         email: scalars.email,
         source: scalars.source,
+        subSource: subSource || null,
+        agencyName: agencyName || null,
+        statusReason: statusReason || null,
+        receivedOn: receivedOn || null,
+        entryMethod: entryMethod || leadEntryMethods.manual,
+        importSessionId: importSessionId || null,
+        importedAt: importedAt || null,
         metaLeadId,
         metaCreatedAt: metaCreatedAt || null,
         campaignId: campaignId || '',
@@ -614,7 +747,19 @@ async function updateLead(auth, leadId, body) {
     throw new AppError(errors.companyMissing, 500)
   }
 
+  // Origin is immutable through normal APIs.
+  if (body && typeof body === 'object') {
+    delete body.entryMethod
+    delete body.addedVia
+    delete body.importSessionId
+    delete body.importBatchId
+    delete body.importedAt
+  }
+
   const scalars = validateLeadScalars(body, { requireCore: false })
+  delete scalars.entryMethod
+  delete scalars.importSessionId
+  delete scalars.importedAt
   Object.assign(lead, scalars)
 
   if (Object.prototype.hasOwnProperty.call(body, 'statusId')) {
@@ -695,9 +840,11 @@ async function updateLead(auth, leadId, body) {
  * @param {object} auth
  * @param {string} leadId
  * @param {object} body
+ * @param {{ suppressNotifications?: boolean }} [options]
  * @returns {Promise<{ message: string, lead: object }>}
  */
-async function assignLead(auth, leadId, body) {
+async function assignLead(auth, leadId, body, options = {}) {
+  const suppressNotifications = options.suppressNotifications === true
   const { sequelize, LeadTransfer } = getModels()
   const lead = await findLeadInScope(auth, leadId)
   // Transfer reason is optional; empty string matches allowNull:false on lead_transfers.reason.
@@ -758,6 +905,7 @@ async function assignLead(auth, leadId, body) {
   if (auth.user && auth.user.name) {
     assignerName = auth.user.name
   }
+  if (!suppressNotifications) {
   try {
     // assignLead is the transfer API: email only for A→B (shouldNotifyTransfer).
     // null→A must not send a new_lead email (that belongs to createLead / Meta create).
@@ -823,6 +971,25 @@ async function assignLead(auth, leadId, body) {
   } catch (_error) {
     // Assignment already saved; WhatsApp must never fail this request.
   }
+  // In-app: null→A uses lead_assigned; A→B uses lead_transferred. Never fail assign.
+  if (isFirstPrimaryAssign) {
+    await inAppNotifications.safeNotify(inAppNotifications.notifyLeadAssigned, {
+      companyId: auth.companyId,
+      leadId: lead.id,
+      newPrimaryAgentId: primary.id,
+      contactName: lead.name,
+    })
+  } else {
+    await inAppNotifications.safeNotify(inAppNotifications.notifyLeadTransferred, {
+      companyId: auth.companyId,
+      leadId: lead.id,
+      previousPrimaryAgentId,
+      newPrimaryAgentId: primary.id,
+      transferId,
+      contactName: lead.name,
+    })
+  }
+  }
 
   const full = await findLeadInScope(auth, lead.id)
   const [row] = await presentLeads(auth, [full])
@@ -845,6 +1012,69 @@ async function deleteLead(auth, leadId) {
     await lead.destroy({ transaction })
   })
   return { message: messages.leadDeleted }
+}
+
+/**
+ * Lists soft-deleted leads for Recycle Bin (company + role scope).
+ * @param {object} auth
+ * @param {object} [query]
+ */
+async function listDeletedLeads(auth, query = {}) {
+  if (!hasPermission(auth, permissionKeys.recycleBinView)) {
+    throw new AppError(errors.forbidden, 403)
+  }
+  const { Lead } = getModels()
+  const page = Math.max(1, Number(query.page) || 1)
+  const limit = Math.min(100, Math.max(1, Number(query.limit) || 20))
+  const filter = leadScopeFilter(auth)
+  if (filter.id === null) {
+    return { leads: [], total: 0, page, limit }
+  }
+  filter.deletedAt = { [Op.ne]: null }
+  const { count, rows } = await Lead.findAndCountAll({
+    where: filter,
+    paranoid: false,
+    order: [['deletedAt', 'DESC']],
+    offset: (page - 1) * limit,
+    limit,
+  })
+  const leads = await presentLeads(auth, rows)
+  return { leads, total: count, page, limit }
+}
+
+/**
+ * Restores a soft-deleted lead. Unique number/metaLeadId remain held by this row.
+ * @param {object} auth
+ * @param {string} leadId
+ * @param {{ allowWithoutRecyclePermission?: boolean }} [options]
+ *   allowWithoutRecyclePermission: Excel import restore path (still requires edit/import).
+ */
+async function restoreLead(auth, leadId, options = {}) {
+  const allowImportPath = options.allowWithoutRecyclePermission === true
+  if (!allowImportPath && !hasPermission(auth, permissionKeys.recycleBinRestore)) {
+    throw new AppError(errors.forbidden, 403)
+  }
+  const { Lead } = getModels()
+  if (!isUuid(leadId)) {
+    throw new AppError(errors.invalidId, 400)
+  }
+  const filter = leadScopeFilter(auth)
+  if (filter.id === null) {
+    throw new AppError(errors.leadNotFound, 404)
+  }
+  filter.id = leadId
+  filter.deletedAt = { [Op.ne]: null }
+  const lead = await Lead.findOne({ where: filter, paranoid: false })
+  if (!lead || !lead.deletedAt) {
+    throw new AppError(errors.leadNotFound, 404)
+  }
+  // Unique constraints (companyId+number, companyId+metaLeadId) stay on this row — no active conflict possible.
+  lead.deletedBy = null
+  await lead.restore()
+  await lead.save()
+  const full = await findLeadInScope(auth, lead.id)
+  const [row] = await presentLeads(auth, [full])
+  return { message: messages.leadRestored, lead: row }
 }
 
 async function findLeadInScope(auth, leadId) {
@@ -985,9 +1215,12 @@ module.exports = {
   updateLead,
   assignLead,
   deleteLead,
+  listDeletedLeads,
+  restoreLead,
   bulkAssignLeads,
   bulkTransferLeads,
   bulkDeleteLeads,
+  findLeadInScope,
   leadScopeFilter,
   buildLeadQuery,
   presentLeads,
@@ -996,4 +1229,6 @@ module.exports = {
   calendarDate,
   readLeadDateBoundary,
   appendLeadDateRangeFilter,
+  resolveCreateProvenance,
+  normalizeEntryMethodFilter,
 }

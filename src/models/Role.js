@@ -29,8 +29,18 @@ function defineRole(sequelize) {
     },
     isSystem: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     isProtected: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    isDeleted: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    deletedAt: { type: DataTypes.DATE, allowNull: true },
+    deletedBy: { type: DataTypes.CHAR(36), allowNull: true },
   }, {
     tableName: 'roles',
+    defaultScope: {
+      where: { isDeleted: false },
+    },
+    scopes: {
+      withDeleted: { where: {} },
+      onlyDeleted: { where: { isDeleted: true } },
+    },
   })
 }
 

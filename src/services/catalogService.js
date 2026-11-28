@@ -5,6 +5,8 @@ const { security } = require('../config/security')
 const { catalogKinds, catalogTones, permissionKeys } = require('../utils/enums')
 const { AppError, errors } = require('../utils/errors')
 const { isUuid, isWithinLength, normalizeNameKey, readText } = require('../utils/helpers')
+const { hasPermission } = require('./accessService')
+const { deriveIsDeleted, markRestored, markSoftDeleted } = require('../utils/softDelete')
 
 /**
  * Catalog (status / tag / activity) management — legacy faloniq catalogService parity.
@@ -26,6 +28,9 @@ function presentCatalogItem(item) {
     tone: item.tone || catalogTones.none,
     isActive: Boolean(item.isActive),
     isSystem: Boolean(item.isSystem),
+    deletedAt: item.deletedAt || null,
+    is_deleted: deriveIsDeleted(item),
+    isDeleted: deriveIsDeleted(item),
   }
 }
 
@@ -56,11 +61,7 @@ function includeInactiveItems(auth, query) {
   if (readText(query, 'includeInactive') !== 'true') {
     return false
   }
-  if (auth.role?.isProtected) {
-    return true
-  }
-  const permissions = auth.role?.permissions || []
-  return permissions.includes(permissionKeys.settingsManage)
+  return hasPermission(auth, permissionKeys.settingsManage)
 }
 
 /**
@@ -158,9 +159,65 @@ async function deleteCatalogItem(auth, itemId) {
   if (uses > 0) {
     throw new AppError(errors.catalogInUse, 400)
   }
-  const presented = presentCatalogItem(item)
-  await CatalogItem.destroy({ where: { id: item.id, companyId: auth.companyId } })
-  return presented
+  await markSoftDeleted(item, { userId: auth.userId })
+  return presentCatalogItem(item)
+}
+
+/**
+ * @param {object} auth
+ * @param {object} [query]
+ */
+async function listDeletedCatalogItems(auth, query = {}) {
+  if (!hasPermission(auth, permissionKeys.recycleBinView)) {
+    throw new AppError(errors.forbidden, 403)
+  }
+  const { CatalogItem } = getModels()
+  const where = { companyId: auth.companyId, isDeleted: true }
+  const kindRaw = readText(query, 'kind')
+  if (kindRaw) {
+    where.kind = readKind(kindRaw)
+  }
+  const items = await CatalogItem.unscoped().findAll({
+    where,
+    order: [['deletedAt', 'DESC']],
+  })
+  return items.map(presentCatalogItem)
+}
+
+/**
+ * @param {object} auth
+ * @param {string} itemId
+ */
+async function restoreCatalogItem(auth, itemId) {
+  if (!hasPermission(auth, permissionKeys.recycleBinRestore)) {
+    throw new AppError(errors.forbidden, 403)
+  }
+  const { CatalogItem } = getModels()
+  if (!isUuid(itemId)) {
+    throw new AppError(errors.invalidId, 400)
+  }
+  const item = await CatalogItem.unscoped().findOne({
+    where: { id: itemId, companyId: auth.companyId, isDeleted: true },
+  })
+  if (!item) {
+    throw new AppError(errors.catalogNotFound, 400)
+  }
+  const conflict = await CatalogItem.findOne({
+    where: {
+      companyId: auth.companyId,
+      kind: item.kind,
+      key: item.key,
+      isDeleted: false,
+    },
+  })
+  if (conflict && conflict.id !== item.id) {
+    throw new AppError(
+      `Cannot restore catalog item "${item.key}": an active ${item.kind} already uses this key.`,
+      409,
+    )
+  }
+  await markRestored(item)
+  return presentCatalogItem(item)
 }
 
 /**
@@ -222,12 +279,16 @@ function readSortOrder(value) {
 async function assertNameFree(companyId, kind, name, exceptId) {
   const { CatalogItem } = getModels()
   const wanted = normalizeNameKey(name)
-  const items = await CatalogItem.findAll({ where: { companyId, kind } })
+  // Include soft-deleted rows so recreate-after-delete cannot collide silently.
+  const items = await CatalogItem.unscoped().findAll({ where: { companyId, kind } })
   for (const item of items) {
     if (exceptId && item.id === exceptId) {
       continue
     }
     if (normalizeNameKey(item.name) === wanted) {
+      if (item.isDeleted) {
+        throw new AppError(errors.catalogKeyDeletedExists, 409)
+      }
       throw new AppError(errors.catalogNameTaken, 409)
     }
   }
@@ -249,11 +310,11 @@ async function buildCustomKey(companyId, kind, name) {
   }
   let candidate = key
   let suffix = 2
-  let found = await CatalogItem.findOne({ where: { companyId, kind, key: candidate } })
+  let found = await CatalogItem.unscoped().findOne({ where: { companyId, kind, key: candidate } })
   while (found) {
     candidate = `${key}_${suffix}`
     suffix += 1
-    found = await CatalogItem.findOne({ where: { companyId, kind, key: candidate } })
+    found = await CatalogItem.unscoped().findOne({ where: { companyId, kind, key: candidate } })
   }
   return candidate
 }
@@ -296,6 +357,8 @@ module.exports = {
   createCatalogItem,
   updateCatalogItem,
   deleteCatalogItem,
+  listDeletedCatalogItems,
+  restoreCatalogItem,
   presentCatalogItem,
   readKind,
 }

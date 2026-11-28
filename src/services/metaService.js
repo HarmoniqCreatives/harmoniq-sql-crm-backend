@@ -31,6 +31,8 @@ const {
   isConnectedPageOwnershipConflict,
   ownershipConflictReason,
 } = require('./metaPageOwnership')
+const { hasPermission } = require('./accessService')
+const { deriveIsDeleted, markRestored, markSoftDeleted } = require('../utils/softDelete')
 
 function presentProfile(profile) {
   let appId = profile.appId || ''
@@ -45,6 +47,9 @@ function presentProfile(profile) {
     secretStored: Boolean(profile.secretStored),
     isActive: Boolean(profile.isActive),
     createdAt: profile.createdAt,
+    deletedAt: profile.deletedAt || null,
+    is_deleted: deriveIsDeleted(profile),
+    isDeleted: deriveIsDeleted(profile),
   }
 }
 
@@ -236,6 +241,13 @@ async function createProfile(auth, body) {
     fields.appSecretCipher = encryptSecret(appSecret)
     fields.secretStored = true
   }
+  const deletedWithLabel = await MetaAppProfile.scope('onlyDeleted').findOne({
+    where: { companyId: auth.companyId, label },
+  })
+  if (deletedWithLabel) {
+    throw new AppError(errors.metaProfileLabelDeletedExists, 409)
+  }
+
   try {
     const profile = await MetaAppProfile.create(fields)
     return presentProfile(profile)
@@ -281,8 +293,78 @@ async function updateProfile(auth, profileId, body) {
 }
 
 async function removeProfile(auth, profileId) {
+  const { MetaConnection, MetaPage, sequelize } = getModels()
   const profile = await findProfile(auth, profileId)
-  await profile.destroy()
+  // Soft-delete profile and owned connections/pages in app code — never rely on DB CASCADE.
+  await sequelize.transaction(async (transaction) => {
+    const connections = await MetaConnection.findAll({
+      where: { companyId: auth.companyId, appProfileId: profile.id },
+      transaction,
+    })
+    for (const connection of connections) {
+      const pages = await MetaPage.findAll({
+        where: { companyId: auth.companyId, connectionId: connection.id },
+        transaction,
+      })
+      for (const page of pages) {
+        await markSoftDeleted(page, { userId: auth.userId, transaction })
+      }
+      await markSoftDeleted(connection, { userId: auth.userId, transaction })
+    }
+    await markSoftDeleted(profile, { userId: auth.userId, transaction })
+  })
+}
+
+async function listDeletedProfiles(auth) {
+  if (!hasPermission(auth, permissionKeys.recycleBinView)) {
+    throw new AppError(errors.forbidden, 403)
+  }
+  const { MetaAppProfile } = getModels()
+  const rows = await MetaAppProfile.unscoped().findAll({
+    where: { companyId: auth.companyId, isDeleted: true },
+    order: [['deletedAt', 'DESC']],
+  })
+  return rows.map(presentProfile)
+}
+
+async function restoreProfile(auth, profileId) {
+  if (!hasPermission(auth, permissionKeys.recycleBinRestore)) {
+    throw new AppError(errors.forbidden, 403)
+  }
+  const { MetaAppProfile, MetaConnection, MetaPage, sequelize } = getModels()
+  const profile = await MetaAppProfile.unscoped().findOne({
+    where: { id: profileId, companyId: auth.companyId, isDeleted: true },
+  })
+  if (!profile) {
+    throw new AppError(errors.metaProfileNotFound, 404)
+  }
+  const conflict = await MetaAppProfile.findOne({
+    where: { companyId: auth.companyId, label: profile.label, isDeleted: false },
+  })
+  if (conflict && conflict.id !== profile.id) {
+    throw new AppError(
+      `Cannot restore profile "${profile.label}": an active profile already uses this label.`,
+      409,
+    )
+  }
+  await sequelize.transaction(async (transaction) => {
+    await markRestored(profile, { transaction })
+    const connections = await MetaConnection.unscoped().findAll({
+      where: { companyId: auth.companyId, appProfileId: profile.id, isDeleted: true },
+      transaction,
+    })
+    for (const connection of connections) {
+      await markRestored(connection, { transaction })
+      const pages = await MetaPage.unscoped().findAll({
+        where: { companyId: auth.companyId, connectionId: connection.id, isDeleted: true },
+        transaction,
+      })
+      for (const page of pages) {
+        await markRestored(page, { transaction })
+      }
+    }
+  })
+  return presentProfile(profile)
 }
 
 async function listConnections(auth) {
@@ -390,8 +472,8 @@ async function assertCallbackUser(state) {
   if (!role || role.companyId !== state.companyId) {
     throw new AppError(errors.metaOAuthFailed, 400)
   }
-  const permissions = role.permissions || []
-  if (!permissions.includes(permissionKeys.metaManage)) {
+  // Same Super Admin bypass as requirePermission — never trust role.permissions alone.
+  if (!hasPermission({ role }, permissionKeys.metaManage)) {
     throw new AppError(errors.metaOAuthFailed, 400)
   }
   return user
@@ -971,11 +1053,13 @@ module.exports = {
   listConnections,
   listPages,
   listProfiles,
+  listDeletedProfiles,
   missingFromGranted,
   presentConnection,
   presentPage,
   presentProfile,
   removeProfile,
+  restoreProfile,
   startOAuth,
   updateProfile,
 }

@@ -27,6 +27,7 @@ const adminUserPermissions = [
   permissionKeys.leadsBulkAssign,
   permissionKeys.leadsBulkTransfer,
   permissionKeys.leadsBulkDelete,
+  permissionKeys.leadsImport,
   permissionKeys.reportsView,
   permissionKeys.settingsManage,
   permissionKeys.metaView,
@@ -34,6 +35,8 @@ const adminUserPermissions = [
   permissionKeys.metaPagesManage,
   permissionKeys.whatsappManage,
   permissionKeys.whatsappViewLogs,
+  permissionKeys.recycleBinView,
+  permissionKeys.recycleBinRestore,
 ]
 
 const roleSeeds = [

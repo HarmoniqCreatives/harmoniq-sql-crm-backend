@@ -68,6 +68,7 @@ const permissionKeys = {
   leadsBulkAssign: 'leads.bulk_assign',
   leadsBulkTransfer: 'leads.bulk_transfer',
   leadsBulkDelete: 'leads.bulk_delete',
+  leadsImport: 'leads.import',
   activitiesManage: 'activities.manage',
   templatesManage: 'templates.manage',
   communicationsSend: 'communications.send',
@@ -77,6 +78,9 @@ const permissionKeys = {
   whatsappManage: 'whatsapp.manage',
   whatsappViewLogs: 'whatsapp.view_logs',
   auditView: 'audit.view',
+  /** Recycle Bin: Super Admin + Admin only (seeded). Backend-enforced. */
+  recycleBinView: 'recycle_bin.view',
+  recycleBinRestore: 'recycle_bin.restore',
   // Legacy alias used by earlier Auth role seeds; map to invite+edit+view bundle in seed sync.
   usersManage: 'users.manage',
   rolesManage: 'roles.manage',
@@ -139,6 +143,35 @@ const leadSources = {
   facebook: 'facebook',
   instagram: 'instagram',
   website: 'website',
+}
+
+/**
+ * How the lead row entered the CRM (provenance; independent of `source`).
+ * Product labels: Manual, Excel Import, Meta, API Import, Unknown.
+ * Set only by trusted server create paths — never from client body.
+ */
+const leadEntryMethods = {
+  manual: 'manual',
+  excelImport: 'excel_import',
+  metaImport: 'meta_import',
+  apiImport: 'api_import',
+  unknown: 'unknown',
+}
+
+const leadImportSessionStatuses = {
+  uploaded: 'uploaded',
+  validated: 'validated',
+  completed: 'completed',
+  failed: 'failed',
+}
+
+const leadImportDecisions = {
+  skip: 'skip',
+  updateExisting: 'update_existing',
+  importAsNew: 'import_as_new',
+  /** Restore a soft-deleted CRM lead that matched phone, then apply blank-safe update. */
+  restoreExisting: 'restore_existing',
+  create: 'create',
 }
 
 const propertyTypes = {
@@ -321,6 +354,40 @@ const whatsappTemplateVariableKeys = [
   'agentPhone',
 ]
 
+/** In-app notification categories (Phase 0). */
+const notificationCategories = {
+  leadAssigned: 'lead_assigned',
+  leadTransferred: 'lead_transferred',
+  followUp: 'follow_up',
+  leadActivity: 'lead_activity',
+  systemAlert: 'system_alert',
+}
+
+const devicePlatforms = {
+  android: 'android',
+  ios: 'ios',
+  web: 'web',
+}
+
+const notificationProviders = {
+  expo: 'expo',
+  fcm: 'fcm',
+}
+
+const notificationDeliveryStatuses = {
+  queued: 'queued',
+  processing: 'processing',
+  sent: 'sent',
+  failed: 'failed',
+  invalidToken: 'invalid_token',
+}
+
+/** Max push send attempts (including the first). Transient failures re-queue until this cap. */
+const notificationPushMaxAttempts = 5
+
+/** Allowed company follow-up reminder lead times (minutes before nextFollowUpAt). */
+const followUpReminderMinutesOptions = [5, 10, 15, 25, 30, 60]
+
 module.exports = {
   companyStatuses,
   userStatuses,
@@ -335,6 +402,9 @@ module.exports = {
   timezones,
   currencies,
   leadSources,
+  leadEntryMethods,
+  leadImportSessionStatuses,
+  leadImportDecisions,
   propertyTypes,
   leadPurposes,
   readinessValues,
@@ -360,4 +430,10 @@ module.exports = {
   whatsappAuditActions,
   whatsappAuditOutcomes,
   whatsappTemplateVariableKeys,
+  notificationCategories,
+  devicePlatforms,
+  notificationProviders,
+  notificationDeliveryStatuses,
+  notificationPushMaxAttempts,
+  followUpReminderMinutesOptions,
 }

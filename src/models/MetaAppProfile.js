@@ -19,8 +19,18 @@ function defineMetaAppProfile(sequelize) {
     isActive: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
     createdBy: { type: DataTypes.CHAR(36), allowNull: false },
     updatedBy: { type: DataTypes.CHAR(36), allowNull: false },
+    isDeleted: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    deletedAt: { type: DataTypes.DATE, allowNull: true },
+    deletedBy: { type: DataTypes.CHAR(36), allowNull: true },
   }, {
     tableName: 'meta_app_profiles',
+    defaultScope: {
+      where: { isDeleted: false },
+    },
+    scopes: {
+      withDeleted: { where: {} },
+      onlyDeleted: { where: { isDeleted: true } },
+    },
   })
 }
 

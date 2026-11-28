@@ -12,8 +12,18 @@ function defineCatalogItem(sequelize) {
     tone: { type: DataTypes.STRING(32), allowNull: false, defaultValue: 'neutral' },
     isActive: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
     isSystem: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    isDeleted: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    deletedAt: { type: DataTypes.DATE, allowNull: true },
+    deletedBy: { type: DataTypes.CHAR(36), allowNull: true },
   }, {
     tableName: 'catalog_items',
+    defaultScope: {
+      where: { isDeleted: false },
+    },
+    scopes: {
+      withDeleted: { where: {} },
+      onlyDeleted: { where: { isDeleted: true } },
+    },
   })
 }
 

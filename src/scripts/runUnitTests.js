@@ -21,6 +21,7 @@ const UNIT_GLOBS = [
   'test/metaPhone.test.js',
   'test/dbEnv.test.js',
   'test/accessPermissions.test.js',
+  'test/rolePermissionsUpdate.unit.test.js',
   'test/requirePermission.middleware.test.js',
   'test/passwordCompatibility.test.js',
   'test/mailFrom.test.js',

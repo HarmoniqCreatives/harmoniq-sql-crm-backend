@@ -27,7 +27,12 @@ roleRouter.get(
 roleRouter.get('/permissions', requirePermission(permissionKeys.rolesView), asyncHandler(getPermissions))
 roleRouter.get('/:id', requirePermission(permissionKeys.rolesView), asyncHandler(getRoleById))
 roleRouter.post('/', requirePermission(permissionKeys.rolesCreate), asyncHandler(postRole))
-roleRouter.patch('/:id', requirePermission(permissionKeys.rolesEdit), asyncHandler(patchRole))
+// roles.edit (current) OR roles.manage (legacy migration alias) may edit roles.
+roleRouter.patch(
+  '/:id',
+  requireAnyPermission([permissionKeys.rolesEdit, permissionKeys.rolesManage]),
+  asyncHandler(patchRole),
+)
 roleRouter.delete('/:id', requirePermission(permissionKeys.rolesDelete), asyncHandler(removeRole))
 
 module.exports = { roleRouter }

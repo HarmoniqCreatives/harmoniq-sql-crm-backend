@@ -950,6 +950,29 @@ async function applyBlankSafeUpdate(auth, leadId, row) {
   return lead.id
 }
 
+/**
+ * Require an exact confirmToken match before mutating CRM data.
+ * Rejects missing/empty/non-string tokens on either side; never logs or returns the expected token.
+ *
+ * @param {object} body
+ * @param {{ confirmToken?: string|null }} session
+ */
+function assertConfirmToken(body, session) {
+  const supplied = body && Object.prototype.hasOwnProperty.call(body, 'confirmToken')
+    ? body.confirmToken
+    : undefined
+  const expected = session ? session.confirmToken : undefined
+  if (
+    typeof supplied !== 'string'
+    || supplied.length === 0
+    || typeof expected !== 'string'
+    || expected.length === 0
+    || supplied !== expected
+  ) {
+    throw new AppError(errors.leadImportSessionNotReady, 400)
+  }
+}
+
 async function confirmSession(auth, sessionId, body = {}) {
   if (!hasPermission(auth, permissionKeys.leadsImport)) {
     throw new AppError(errors.forbidden, 403)
@@ -965,9 +988,7 @@ async function confirmSession(auth, sessionId, body = {}) {
   if (session.status !== leadImportSessionStatuses.validated) {
     throw new AppError(errors.leadImportSessionNotReady, 400)
   }
-  if (body.confirmToken && session.confirmToken && body.confirmToken !== session.confirmToken) {
-    throw new AppError(errors.leadImportSessionNotReady, 400)
-  }
+  assertConfirmToken(body, session)
 
   const validatedRows = session.rowsJson || []
   const decisionMap = assertConfirmDecisions(validatedRows, body.decisions || [])
@@ -1207,6 +1228,7 @@ module.exports = {
   formatValidationError,
   groupErrorsByReason,
   assertConfirmDecisions,
+  assertConfirmToken,
   applyDuplicateReviewFlags,
   buildInternalExcelDuplicateGroups,
   hardValidationErrors,

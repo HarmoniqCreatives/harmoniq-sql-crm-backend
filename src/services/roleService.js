@@ -54,6 +54,58 @@ function readPermissions(body) {
 }
 
 /**
+ * Hidden legacy aliases that the Roles UI matrix may omit on save.
+ * Only keys already present on the role are re-attached (never auto-granted).
+ */
+const HIDDEN_LEGACY_PERMISSIONS = [
+  permissionKeys.activitiesManage,
+  permissionKeys.templatesManage,
+  permissionKeys.communicationsSend,
+  permissionKeys.auditView,
+  permissionKeys.usersManage,
+  permissionKeys.rolesManage,
+]
+
+/**
+ * Validate a submitted permissions array for role update.
+ * - Every submitted key must be known (`isKnownPermission`).
+ * - Existing hidden legacy permissions are preserved when omitted from the payload.
+ * - Legacy keys the role did not already have are never auto-added.
+ * - Privilege-escalation checks apply only to newly added keys so existing
+ *   legacy permissions can remain even when the actor does not hold them.
+ *
+ * @param {object} auth
+ * @param {string[]} existingPermissions
+ * @param {string[]} submittedPermissions
+ * @returns {string[]}
+ */
+function resolveUpdatedPermissions(auth, existingPermissions, submittedPermissions) {
+  const submitted = [...new Set(
+    (Array.isArray(submittedPermissions) ? submittedPermissions : [])
+      .map((value) => String(value)),
+  )]
+  const unknown = submitted.filter((key) => !isKnownPermission(key))
+  if (unknown.length) {
+    throw new AppError(errors.rolePermissionsInvalid, 400, 'APP_ERROR', { invalid: unknown })
+  }
+
+  const existing = (Array.isArray(existingPermissions) ? existingPermissions : [])
+    .map((value) => String(value))
+  const existingSet = new Set(existing)
+  const submittedSet = new Set(submitted)
+
+  // Re-attach hidden legacy keys the role already had but the UI omitted.
+  const preservedLegacy = HIDDEN_LEGACY_PERMISSIONS.filter(
+    (key) => existingSet.has(key) && !submittedSet.has(key),
+  )
+
+  const permissions = [...new Set([...submitted, ...preservedLegacy])]
+  const newlyAdded = permissions.filter((key) => !existingSet.has(key))
+  assertCanAssignPermissions(auth, newlyAdded)
+  return permissions
+}
+
+/**
  * Lists company roles plus the permission matrix for the UI.
  *
  * @param {object} auth
@@ -201,13 +253,11 @@ async function updateRole(auth, roleId, body) {
     role.scope = scope
   }
   if (body.permissions !== undefined) {
-    const permissions = readPermissions(body)
-    const unknown = permissions.filter((key) => !isKnownPermission(key))
-    if (unknown.length) {
-      throw new AppError(errors.rolePermissionsInvalid, 400, 'APP_ERROR', { invalid: unknown })
-    }
-    assertCanAssignPermissions(auth, permissions)
-    role.permissions = permissions
+    role.permissions = resolveUpdatedPermissions(
+      auth,
+      role.permissions || [],
+      readPermissions(body),
+    )
   }
 
   await role.save()
@@ -297,4 +347,7 @@ module.exports = {
   listDeletedRoles,
   restoreRole,
   presentRole,
+  resolveUpdatedPermissions,
+  readPermissions,
+  HIDDEN_LEGACY_PERMISSIONS,
 }

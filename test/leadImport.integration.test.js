@@ -320,6 +320,74 @@ test('lead import integration: session create, validate, confirm, idempotent', {
   }
 })
 
+test('lead import integration: confirmToken required; wrong token rejected; correct token + idempotent retry', {
+  skip: !RUN,
+}, async (t) => {
+  if (!ready) {
+    t.skip('Import migration not applied on DB_NAME_TEST')
+    return
+  }
+
+  const admin = await registerVerifiedAdmin('ImpTok')
+  const phone = `+97156${String(Date.now()).slice(-7)}`
+  const buffer = await buildWorkbookBuffer([
+    ['Token Lead', phone, 'token@import.test', 'manual', 'New', '', '', '', '', '', ''],
+  ])
+
+  const created = await request(app)
+    .post('/api/leads/import/sessions')
+    .set('Authorization', `Bearer ${admin.accessToken}`)
+    .attach('file', buffer, 'token.xlsx')
+  assert.equal(created.status, 201, JSON.stringify(created.body))
+  const sessionId = created.body.data.session.id
+
+  const validated = await request(app)
+    .post(`/api/leads/import/sessions/${sessionId}/validate`)
+    .set('Authorization', `Bearer ${admin.accessToken}`)
+    .send({ mapping: created.body.data.suggestedMapping })
+  assert.equal(validated.status, 200, JSON.stringify(validated.body))
+  assert.equal(validated.body.data.session.status, 'validated')
+  const confirmToken = validated.body.data.session.confirmToken
+  assert.ok(confirmToken && typeof confirmToken === 'string')
+
+  const { Lead, LeadImportSession } = getModels()
+  const leadsBefore = await Lead.count({ where: { companyId: admin.companyId } })
+
+  const missingToken = await request(app)
+    .post(`/api/leads/import/sessions/${sessionId}/confirm`)
+    .set('Authorization', `Bearer ${admin.accessToken}`)
+    .send({ decisions: [] })
+  assert.equal(missingToken.status, 400)
+  assert.match(String(missingToken.body?.error?.message || missingToken.body?.message || ''), /Validate the import session/i)
+
+  const wrongToken = await request(app)
+    .post(`/api/leads/import/sessions/${sessionId}/confirm`)
+    .set('Authorization', `Bearer ${admin.accessToken}`)
+    .send({ confirmToken: 'definitely-not-the-session-token', decisions: [] })
+  assert.equal(wrongToken.status, 400)
+
+  const sessionAfterReject = await LeadImportSession.findByPk(sessionId)
+  assert.equal(sessionAfterReject.status, 'validated')
+  assert.equal(sessionAfterReject.confirmToken, confirmToken)
+  const leadsAfterReject = await Lead.count({ where: { companyId: admin.companyId } })
+  assert.equal(leadsAfterReject, leadsBefore, 'rejected confirm must not create/update/restore leads')
+
+  const confirm = await request(app)
+    .post(`/api/leads/import/sessions/${sessionId}/confirm`)
+    .set('Authorization', `Bearer ${admin.accessToken}`)
+    .send({ confirmToken, decisions: [] })
+  assert.equal(confirm.status, 200, JSON.stringify(confirm.body))
+  assert.equal(confirm.body.data.session.status, 'completed')
+  assert.ok(confirm.body.data.results.succeededCount >= 1)
+
+  const again = await request(app)
+    .post(`/api/leads/import/sessions/${sessionId}/confirm`)
+    .set('Authorization', `Bearer ${admin.accessToken}`)
+    .send({ decisions: [] })
+  assert.equal(again.status, 200)
+  assert.equal(again.body.data.idempotent, true)
+})
+
 test('lead import integration: update existing blank-safe + tag merge', {
   skip: !RUN,
 }, async (t) => {

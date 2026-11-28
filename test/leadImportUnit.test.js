@@ -22,8 +22,10 @@ const {
   applyDuplicateReviewFlags,
   buildInternalExcelDuplicateGroups,
   assertConfirmDecisions,
+  assertConfirmToken,
 } = require('../src/services/leadImportService')
 const { leadEntryMethods, leadImportDecisions, permissionKeys } = require('../src/utils/enums')
+const { errors } = require('../src/utils/errors')
 const assignmentNotifications = require('../src/services/assignmentNotificationService')
 const leadService = require('../src/services/leadService')
 
@@ -523,4 +525,58 @@ test('excel import confirm suppresses per-row assignment side effects (source co
   assert.equal(typeof assignmentNotifications.notifyLeadPrimaryAssignment, 'function')
   assert.equal(typeof leadService.createLead, 'function')
   assert.equal(typeof leadService.assignLead, 'function')
+})
+
+test('assertConfirmToken rejects missing, empty, non-string, and mismatched tokens', () => {
+  const session = { confirmToken: 'abc123def456' }
+  const expectNotReady = (fn) => {
+    assert.throws(fn, (error) => (
+      error.statusCode === 400
+      && error.message === errors.leadImportSessionNotReady
+      && !String(error.message).includes(session.confirmToken)
+    ))
+  }
+
+  expectNotReady(() => assertConfirmToken({}, session))
+  expectNotReady(() => assertConfirmToken({ decisions: [] }, session))
+  expectNotReady(() => assertConfirmToken({ confirmToken: '' }, session))
+  expectNotReady(() => assertConfirmToken({ confirmToken: null }, session))
+  expectNotReady(() => assertConfirmToken({ confirmToken: 123 }, session))
+  expectNotReady(() => assertConfirmToken({ confirmToken: 'wrong-token' }, session))
+  expectNotReady(() => assertConfirmToken({ confirmToken: 'abc123def456' }, { confirmToken: null }))
+  expectNotReady(() => assertConfirmToken({ confirmToken: 'abc123def456' }, { confirmToken: '' }))
+  expectNotReady(() => assertConfirmToken({ confirmToken: 'abc123def456' }, {}))
+
+  assert.doesNotThrow(() => assertConfirmToken(
+    { confirmToken: 'abc123def456' },
+    session,
+  ))
+})
+
+test('confirmSession source contract: token required after validated, before mutations', () => {
+  const fs = require('node:fs')
+  const path = require('node:path')
+  const importSrc = fs.readFileSync(
+    path.join(__dirname, '../src/services/leadImportService.js'),
+    'utf8',
+  )
+  const start = importSrc.indexOf('async function confirmSession')
+  const end = importSrc.indexOf('async function getSession(auth', start)
+  assert.ok(start >= 0 && end > start, 'confirmSession block must be locatable')
+  const confirmFn = importSrc.slice(start, end)
+  assert.match(confirmFn, /assertConfirmToken\(body, session\)/)
+  assert.ok(
+    confirmFn.indexOf('leadImportSessionStatuses.completed')
+      < confirmFn.indexOf('assertConfirmToken(body, session)'),
+    'completed/idempotent path must run before token enforcement',
+  )
+  assert.ok(
+    confirmFn.indexOf('assertConfirmToken(body, session)')
+      < confirmFn.indexOf('assertConfirmDecisions'),
+    'token must be enforced before duplicate decisions / lead mutations',
+  )
+  assert.ok(
+    !/body\.confirmToken\s*&&\s*session\.confirmToken/.test(confirmFn),
+    'optional-token mismatch check must not remain',
+  )
 })
